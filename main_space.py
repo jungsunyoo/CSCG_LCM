@@ -134,7 +134,7 @@ room = np.array([
 # clones=[70]
 # nclone = 70
 # import igraph
-def train(seed, alpha,niter=100):
+def train(seed, alpha,niter):
     seed = int(seed)
     alpha = float(alpha)
     
@@ -204,8 +204,8 @@ def train(seed, alpha,niter=100):
 def main():
     seed = sys.argv[1:][0]
     alpha = sys.argv[1:][1]
-    
-    train(seed, alpha)
+    niter = sys.argv[1:][2]
+    train(seed, alpha, niter)
 
 if __name__ == "__main__":
     main()
