@@ -1,3 +1,4 @@
+
 ## A Few utility functions
 
 import numpy as np
@@ -46,6 +47,7 @@ def plot_graph(
     if multiple_episodes:
         node_labels -= 1
     colors = [cmap(nl)[:3] for nl in node_labels / node_labels.max()]
+    # out=[]
     out = igraph.plot(
         g,
         output_file,
@@ -136,7 +138,7 @@ def plot_graph_modularity(
     #     margin=50,
     # )
 
-    return out, modularity_score
+    return out, modularity_score, v, g
 
 
 def get_mess_fwd(chmm, x, pseudocount=0.0, pseudocount_E=0.0):

@@ -10,7 +10,7 @@ import networkx as nx  # Import the networkx library
 import matplotlib.pyplot as plt
 import pdb
 from IPython.display import display, Image
-
+import pickle
 
 # from __future__ import print_function
 # from builtins import range
@@ -20,6 +20,8 @@ from IPython.display import display, Image
 # import sys
 # import networkx as nx  # Import the networkx library
 # from numba import jit
+
+
 
 def validate_seq(x, a, n_clones=None):
     """Validate an input sequence of observations x and actions a"""
@@ -197,7 +199,7 @@ def CRP(container, curr_observation, alpha=1.0):
 
 
 class CHMM_LCM(object):
-    def __init__(self, x, a, container, n_clones=1, pseudocount=0.0, alpha=1.0, dtype=np.float32, seed=42):
+    def __init__(self, x, a, container, n_clones=1, pseudocount=0.0, alpha=1.0, dtype=np.float32, seed=42, filename='best_model.pkl'):
         """Construct a CHMM objct. n_clones is an array where n_clones[i] is the
         number of clones assigned to observation i. x and a are the observation sequences
         and action sequences, respectively."""
@@ -219,13 +221,44 @@ class CHMM_LCM(object):
         self.update_T()
         self.container = container
         self.alpha = alpha
+        self.best_loss = float('inf')
+        self.best_model_filename = filename
+        # self.progression = []
         # self.container = TableContainer() # initialize CRP
         # self.all_table_counts = {}
         # for i in range(1, len(n_clones) + 1):
         #     self.all_table_counts[i] = {1: 1}  # Each table initialized with {1: 1}
 
 
+    def save_best_model(self, current_loss):
+        if current_loss < self.best_loss:
+            self.best_loss = current_loss  # Update the best loss
+            with open(self.best_model_filename, 'wb') as file:
+                pickle.dump(self, file)
+        # Save the model only if the current loss is the best one
+        # if current_loss < self.best_loss:
+            # self.best_loss = current_loss  # Update the best loss
+            # with open(self.best_model_filename, 'wb') as f:
+                # pickle.dump({'model': self, 'loss': self.best_loss}, f)
+            # print(f"New best model saved with loss {current_loss}")
+        # else:
+            # print(f"Model not saved, current loss {current_loss} is not lower than best loss {self.best_loss}")
 
+    def load_model(self):
+        # Load the best model from a file
+        with open(self.best_model_filename, 'rb') as f:
+            loaded_model = pickle.load(f)
+            # self.__dict__.update(data['model'].__dict__)
+            # self.best_loss = data['loss']
+        
+        print(f"Model loaded with loss {self.best_loss}")
+        return loaded_model
+    
+# with open('model_filename.pkl', 'rb') as file:
+#     loaded_model = pickle.load(file)
+    
+    
+    
     def update_T(self):
         """Update the transition matrix given the accumulated counts matrix."""
         self.T = self.C + self.pseudocount
@@ -338,17 +371,26 @@ class CHMM_LCM(object):
             self.update_T()
             convergence.append(-log2_lik.mean())
             pbar.set_postfix(train_bps=convergence[-1])
-            if log2_lik.mean() <= log2_lik_old:
-                if term_early:
-                    break
-            log2_lik_old = log2_lik.mean()
+            # loss = 
+            if convergence[-1] <= self.best_loss: 
+                self.save_best_model(convergence[-1])
+                pbar.set_postfix_str(f"New best model at epoch {it} saved with loss {self.best_loss:.4f}")
+            pbar.update(1)
+        pbar.close()
+                # 
+            # progression = convergence
+            # if log2_lik.mean() <= log2_lik_old:
+            #     if term_early:
+            #         break
+            # log2_lik_old = log2_lik.mean()
             # print(log2_lik_old)
         # JY added for plotting learning curve
-        plt.plot(convergence, label='Training Loss')
-        plt.title('Learning Curve')
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-        plt.show()
+        # plt.plot(convergence, label='Training Loss')
+        # plt.title('Learning Curve')
+        # plt.xlabel('Epochs')
+        # plt.ylabel('Loss')
+        # plt.show()
+        self.progression = convergence
         return convergence
 
     def learn_viterbi_T(self, x, a, n_iter=100):

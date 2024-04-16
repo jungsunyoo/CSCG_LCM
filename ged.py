@@ -1,4 +1,4 @@
-import igraph as ig
+# import igraph as ig
 from queue import PriorityQueue
 
 def heuristic(graph1, graph2):
