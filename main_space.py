@@ -137,7 +137,7 @@ room = np.array([
 def train(seed, alpha,niter):
     seed = int(seed)
     alpha = float(alpha)
-    
+    niter = int(niter)
     filename = 'model_spatial_alpha_' + str(alpha) + '_seed_' + str(seed) + '.pkl'
     n_emissions = room.max() + 1
     nclone=1
