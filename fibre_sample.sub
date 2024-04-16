@@ -1,0 +1,21 @@
+#!/bin/bash
+
+#SBATCH --job-name=sample     ## Name of the job.
+#SBATCH -p standard          ## partition/queue name
+#SBATCH --nodes=1            ## (-N) number of nodes to use
+#SBATCH --ntasks=1           ## (-n) number of tasks to launch
+#SBATCH --error=slurm-%J.err 	## error log file
+#SBATCH --array=0-1             ## number of array tasks is 100 (random seeds)
+#SBATCH --mail-type=end               ## send email when the job ends
+#SBATCH --mail-user=jungsuy@uci.edu  ## use this email address
+
+# Run the following two lines every time you submit a python script to slurm, this tells slurm about your conda env and loads it.
+source ~/.bashrc
+
+conda activate cscg
+
+# This next line just runs the python script
+
+python3 main_space.py $SLURM_ARRAY_TASK_ID ${1} 100
+
+exit
