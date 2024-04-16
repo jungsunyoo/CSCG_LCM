@@ -149,7 +149,7 @@ def create_lattice_graph_varied(num_nodes=15, num_observations=10000, num_aliase
 
     return x
 
-def train(seed, alpha, num_nodes=30, num_observations=50000, num_clones=10, num_modules=3, aliasing=3):
+def train(seed, alpha, niter, num_nodes=30, num_observations=50000, num_clones=10, num_modules=3, aliasing=3):
     # var_nodes = np.arange(5,50,5)
     seed = int(seed)
     alpha = float(alpha)    

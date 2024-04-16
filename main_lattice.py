@@ -242,7 +242,7 @@ def train(seed, alpha, niter, num_nodes=30, num_observations=50000, num_clones=1
     # n_clones = np.ones(max(x)+1, dtype=np.int64) * num_clones
     container = TableContainer()
     filename = 'model_lattice_alpha_' + str(alpha) + '_seed_' + str(seed) + '.pkl'
-    chmm_ = CHMM_LCM(n_clones=n_clones, pseudocount=2e-3, x=x, a=a, container=container,alpha=alpha,seed=seed)  # Initialize the model
+    chmm_ = CHMM_LCM(n_clones=n_clones, pseudocount=2e-3, x=x, a=a, container=container,alpha=alpha,seed=seed, filename=filename)  # Initialize the model
     progression = chmm_.learn_em_T(x, a, n_iter=niter,
                                     # term_early=False,
                                     )  # Training   use n_iter=1000 for better training
