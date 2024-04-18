@@ -307,10 +307,10 @@ class CHMM_LCM(object):
 
     def decode(self, x, a):
         """Compute the MAP assignment of latent variables using max-product message passing."""
-        print("decode C: {}".format(np.shape(self.C)))
-        print("decode T: {}".format(np.shape(self.T)))
-        print("decode Pi: {}".format(np.shape(self.Pi_x)))
-        print("decode n_clones: {}".format(self.n_clones))
+        # print("decode C: {}".format(np.shape(self.C)))
+        # print("decode T: {}".format(np.shape(self.T)))
+        # print("decode Pi: {}".format(np.shape(self.Pi_x)))
+        # print("decode n_clones: {}".format(self.n_clones))
         log2_lik, mess_fwd = forward_mp(
             self.T.transpose(0, 2, 1),
             self.Pi_x,

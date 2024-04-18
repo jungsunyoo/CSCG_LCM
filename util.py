@@ -122,9 +122,9 @@ def plot_graph_modularity(
     # print(len(comms))
     # Detect communities using the Louvain method
     communities = g.community_multilevel()
-    print(communities)
+    # print(communities)
     modularity_score = g.modularity(communities)
-    print("Modularity Score:", np.round(modularity_score,2))
+    # print("Modularity Score:", np.round(modularity_score,2))
     # Optionally, visualize the graph with its communities
     out = igraph.plot(communities, output_file, layout=g.layout("kamada_kawai"),
                       mark_groups=True, vertex_label=v, vertex_size=vertex_size, margin=50,)
