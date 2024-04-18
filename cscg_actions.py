@@ -951,6 +951,7 @@ def backward(T, n_clones, x, a, mess_loc, state_loc, unique_obs):
 # @nb.njit
 def forward_mp(T_tr, Pi, n_clones, x, a, store_messages=False):
     """Log-probability of a sequence, and optionally, messages"""
+    # pdb.set_trace()
     state_loc = np.hstack((np.array([0], dtype=n_clones.dtype), n_clones)).cumsum()
     dtype = T_tr.dtype.type
     # pdb.set_trace()
@@ -978,6 +979,7 @@ def forward_mp(T_tr, Pi, n_clones, x, a, store_messages=False):
         mess_fwd = None
 
     for t in range(1, x.shape[0]):
+        # print(t)
         aij, i, j = (
             a[t - 1],
             x[t - 1],
@@ -992,6 +994,8 @@ def forward_mp(T_tr, Pi, n_clones, x, a, store_messages=False):
             new_message[d] = (T_tr[aij, j_start + d, i_start:i_stop] * message).max()
         message = new_message
         p_obs = message.max()
+        # print(p_obs)
+        # print(message)
         assert p_obs > 0
         message /= p_obs
         log2_lik[t] = np.log2(p_obs)
