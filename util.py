@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import igraph
 from matplotlib import cm, colors
 import os
+import networkx as nx
 
 custom_colors = (
     np.array(
@@ -26,6 +27,63 @@ custom_colors = (
 )
 if not os.path.exists("figures"):
     os.makedirs("figures")
+
+
+def graph_edit_distance_nx(chmm, x, a, gt_A, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30):
+    # pdb.set_trace()
+    states = chmm.decode(x, a)[1]
+
+    v = np.unique(states)
+    if multiple_episodes:
+        T = chmm.C[:, v][:, :, v][:-1, 1:, 1:]
+        v = v[1:]
+    else:
+        T = chmm.C[:, v][:, :, v]
+    A = T.sum(0)
+    A /= A.sum(1, keepdims=True)    
+    
+    # ged
+    gt_G = nx.from_numpy_array(gt_A)
+    constructed_G = nx.from_numpy_array(A)    
+    
+    cost = nx.optimize_edit_paths(constructed_G, gt_G, timeout=60)
+    min_ged = next(cost)[-1]    
+    
+    return(min_ged)
+    
+
+def return_A(
+    chmm, x, a, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30
+):
+    # pdb.set_trace()
+    states = chmm.decode(x, a)[1]
+
+    v = np.unique(states)
+    if multiple_episodes:
+        T = chmm.C[:, v][:, :, v][:-1, 1:, 1:]
+        v = v[1:]
+    else:
+        T = chmm.C[:, v][:, :, v]
+    A = T.sum(0)
+    A /= A.sum(1, keepdims=True)
+
+    # g = igraph.Graph.Adjacency((A > 0).tolist())
+    # node_labels = np.arange(x.max() + 1).repeat(chmm.n_clones)[v]
+    # if multiple_episodes:
+    #     node_labels -= 1
+    # colors = [cmap(nl)[:3] for nl in node_labels / node_labels.max()]
+    # # out=[]
+    # out = igraph.plot(
+    #     g,
+    #     output_file,
+    #     layout=g.layout("kamada_kawai"),
+    #     vertex_color=colors,
+    #     vertex_label=v,
+    #     vertex_size=vertex_size,
+    #     margin=50,
+    # )
+
+    return A
     
 def plot_graph(
     chmm, x, a, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30
@@ -92,7 +150,7 @@ def plot_graph_infomap(
         margin=50,
     )
 
-    return out
+    return len(comms)
 
 def plot_graph_modularity(
     chmm, x, a, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30

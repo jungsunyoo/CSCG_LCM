@@ -321,7 +321,7 @@ class CHMM_LCM(object):
         )
         states, ginis = backtrace(self.T, self.n_clones, x, a, mess_fwd)
         # print(mess_fwd)
-        return -log2_lik, states, ginis
+        return -log2_lik, states, ginis, mess_fwd
 
     def decodeE(self, E, x, a):
         """Compute the MAP assignment of latent variables using max-product message passing
