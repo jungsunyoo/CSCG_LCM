@@ -46,10 +46,22 @@ def graph_edit_distance_nx(chmm, x, a, gt_A, output_file, cmap=cm.Spectral, mult
     gt_G = nx.from_numpy_array(gt_A)
     constructed_G = nx.from_numpy_array(A)    
     
-    cost = nx.optimize_edit_paths(constructed_G, gt_G, timeout=60)
-    min_ged = next(cost)[-1]    
+    cost = nx.optimize_edit_paths(constructed_G, gt_G, timeout=100)
+    try:
+        first_cost = next(cost)
+        min_ged = first_cost[-1]
+    except StopIteration:
+        min_ged = np.nan    
+    # if next(cost): 
+    #     min_ged = next(cost)[-1]
+    # else: 
+    #     min_ged = np.nan
+    # if cost: 
+    #     min_ged = next(cost)[-1]
+    # else: 
+    #     min_ged = np.nan    
     
-    return(min_ged)
+    return min_ged 
     
 
 def return_A(

@@ -196,7 +196,41 @@ def CRP(container, curr_observation, alpha=1.0):
 
     return assignments, probs
 
+def sticky_CRP(container, curr_observation, alpha=1.0, beta=1.0):
+    """
+    Simulates the Chinese Restaurant Process.
 
+    Parameters:
+    - history: int, the total number of customers to simulate.
+    - alpha: float, the concentration parameter.
+
+    Returns:
+    - A list where the i-th element represents the table number of the i-th customer.
+    """
+
+    n = container.get_group_total(curr_observation)
+
+
+    if curr_observation not in container.groups_of_tables:
+      container.add_clone(curr_observation,0)
+      table_choice = 0
+      assignments = 0
+      probs = 1
+    else:
+      probs = [clone_count / (n + alpha) for table_id, clone_count in container.groups_of_tables[curr_observation].items()] + [alpha / (n + alpha)] # This is the prior
+
+
+    # Add an update rule (ref Nora's paper 1st equation)
+
+    # Choose a table based on the probabilities
+      table_choice = np.random.choice(len(probs), p=probs)
+
+
+    # update clone --> existing or new, same
+      container.add_clone(curr_observation,table_choice)
+      assignments = table_choice
+
+    return assignments, probs
 
 class CHMM_LCM(object):
     def __init__(self, x, a, container, n_clones=1, pseudocount=0.0, alpha=1.0, dtype=np.float32, seed=42, filename='best_model.pkl'):
@@ -214,7 +248,8 @@ class CHMM_LCM(object):
         self.dtype = dtype
 
         # self.C = np.random.rand(n_actions, n_states, n_states).astype(dtype) # this should be changed; actually, n_actions, n_states should be modified too
-        self.C = np.random.rand(n_actions, n_states, n_states).astype(dtype) # this should be changed; actually, n_actions, n_states should be modified too
+        # self.C = np.random.rand(n_actions, n_states, n_states).astype(dtype) # this should be changed; actually, n_actions, n_states should be modified too
+        self.C = np.random.rand(4,2,2).astype(dtype) # start from scratch
 
         self.Pi_x = np.ones(n_states) / n_states
         self.Pi_a = np.ones(n_actions) / n_actions
@@ -680,7 +715,7 @@ def post_clone_T(matrix, insert_row, insert_col, new_element=None, placeholder=N
     return new_matrix
 
 
-def forward(T_tr, Pi, n_clones, x, a, container,alpha=1.0,store_messages=False):
+def forward(T_tr, Pi, n_clones, x, a, container,alpha=1.0, store_messages=False):
   # JY changed for full bottom-up assignment of clones (i.e., no prior assumption about the number of observations)
     """Log-probability of a sequence, and optionally, messages"""
 
@@ -729,10 +764,19 @@ def forward(T_tr, Pi, n_clones, x, a, container,alpha=1.0,store_messages=False):
       # n_clones[j-1] += 1
       # if ind >= len(n_clones): # n_clones[ind] does not exist
       n_clones = np.append(n_clones, 1)
+      
       # print('splitted')
       # n_clones = np.concatenate((n_clones, np.array([0])))  # Append an initial array
       # n_clones[ind] += int(1)
     state_loc = np.hstack((np.array([0], dtype=n_clones.dtype), n_clones)).cumsum() # redefine start # of the states (observations)
+    T_tr = post_clone_T(T_tr, state_loc[ind], state_loc[ind])
+    # if not all observations have been encountered
+    # if len(state_loc) == 2: 
+    #     pdb.set_trace()
+    #     state_loc = np.append(state_loc, np.shape(T_tr)[2]-2)
+    #     state_loc = np.append(state_loc, np.shape(T_tr)[2]-1)
+    # elif len(state_loc) == 3: 
+    #     state_loc = np.append(state_loc, np.shape(T_tr)[2]-1)
     # print(state_loc)
       # if store_messages:
       #   mess_loc = np.hstack((np.array([0], dtype=n_clones.dtype), n_clones[x])).cumsum()
@@ -781,15 +825,45 @@ def forward(T_tr, Pi, n_clones, x, a, container,alpha=1.0,store_messages=False):
 
         # 1. Loop through the observations and add unique elements to the list
         if j not in unique_obs:
-          unique_obs.append(j)
-        old_ind = ind # previous index
-        ind = unique_obs.index(j) # observation index
+            unique_obs.append(j)
+            old_ind = ind # previous index
+            ind = unique_obs.index(j) # observation index
+            T_tr = post_clone_T(T_tr, state_loc[ind], state_loc[ind])
+        else: 
+            old_ind = ind # previous index
+            ind = unique_obs.index(j) # observation index
+            
 
         # This is where CRP (clone separation) happens
         prev_tables = container.count_tables_in_group(ind)
         # print(prev_tables)
+        
+        ### CHANGE HERE
+        
+        # print(np.argmax(T_tr[a[t-1], x[t-1], :]))
+        ### Prediction error signal: 
+        # pe = T_tr[a[t-1], x[t-1], ind]
+        # print(state_loc)
+        # print(np.shape(T_tr))
+        # print(x[t-1])
+        # print(unique_obs)
+        # print(old_ind, ind)
+        # pdb.set_trace()
+        # for i in range(len(state_loc)-1):
+            # if state_loc[-1] == 
+            
+        PEs = np.array([np.sum(T_tr[a[t-1], old_ind, state_loc[i]:state_loc[i+1]]) for i in range(len(state_loc)-1)])
+        PEs = np.append(PEs, np.sum(T_tr[a[t-1], old_ind, state_loc[-1]:]))
+        
+        PE = PEs[ind]
+        # state_loc
+        # for i, p in enumerate(state_loc): 
+            # curr_prob = T_tr[a[t-1], x[t-1], :]
+         
+        
         if old_ind != ind: # DON'T SPLIT CLONES WHEN TRANSITIONING TO ITSELF
-          assignment, _ =  CRP(container, ind, alpha=alpha)
+        #   assignment, _ =  CRP(container, ind, alpha=alpha)
+            assignment, _ =  CRP(container, ind, alpha=1/PE)
         post_tables = container.count_tables_in_group(ind)
         # print(post_tables)
 
@@ -843,8 +917,17 @@ def forward(T_tr, Pi, n_clones, x, a, container,alpha=1.0,store_messages=False):
         message = np.ascontiguousarray(T_tr[aij, j_start:j_stop, i_start:i_stop]).dot(
             message
         )
+        # print("T_tr: ".format(T_tr))
+        # print("j_start: ".format(j_start))
+        # print("j_stop: ".format(j_stop))
+        # print("i_start: ".format(i_start))
+        # print("i_stop: ".format(i_stop))
+        # print(T_tr, j_start, j_stop, i_start, i_stop)
+        # print(state_loc)
+        # print(message)
         # print("Message after dot: {}".format(message))
         p_obs = message.sum()
+        # print(p_obs)
         assert p_obs > 0
         message /= p_obs
         log2_lik[t] = np.log2(p_obs)
