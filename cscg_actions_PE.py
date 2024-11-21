@@ -20,7 +20,20 @@ import pickle
 # import sys
 # import networkx as nx  # Import the networkx library
 # from numba import jit
-
+def softmax(x):
+    # Step 1: Subtract the max value from each element to prevent overflow in exp
+    x_shifted = x - np.max(x, axis=-1, keepdims=True)
+    
+    # Step 2: Exponentiate the shifted values
+    exp_x = np.exp(x_shifted)
+    
+    # Step 3: Sum the exponentiated values
+    sum_exp_x = np.sum(exp_x, axis=-1, keepdims=True)
+    
+    # Step 4: Normalize by dividing each exponentiated value by the sum
+    softmax_x = exp_x / sum_exp_x
+    
+    return softmax_x
 
 
 def validate_seq(x, a, n_clones=None):
@@ -853,9 +866,13 @@ def forward(T_tr, Pi, n_clones, x, a, container,store_messages=False):
             # if state_loc[-1] == 
             
         PEs = np.array([np.sum(T_tr[a[t-1], old_ind, state_loc[i]:state_loc[i+1]]) for i in range(len(state_loc)-1)])
-        PEs = np.append(PEs, np.sum(T_tr[a[t-1], old_ind, state_loc[-1]:]))
-        
-        PE = PEs[ind]
+        if len(state_loc) < 5: ####CHECK THIS PART LATER
+            PEs = np.append(PEs, np.sum(T_tr[a[t-1], old_ind, state_loc[-1]:]))
+        PEs_softmax = softmax(PEs)
+        PE = PEs_softmax[ind]
+        # PE = PEs[ind]
+        # print(PEs_softmax)
+        # print(PE)
         # state_loc
         # for i, p in enumerate(state_loc): 
             # curr_prob = T_tr[a[t-1], x[t-1], :]
@@ -863,7 +880,7 @@ def forward(T_tr, Pi, n_clones, x, a, container,store_messages=False):
         
         if old_ind != ind: # DON'T SPLIT CLONES WHEN TRANSITIONING TO ITSELF
         #   assignment, _ =  CRP(container, ind, alpha=alpha)
-            assignment, _ =  CRP(container, ind, alpha=1/(PE*10))
+            assignment, _ =  CRP(container, ind, alpha=1 - PE)
         post_tables = container.count_tables_in_group(ind)
         # print(post_tables)
 

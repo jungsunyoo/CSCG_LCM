@@ -63,6 +63,58 @@ def graph_edit_distance_nx(chmm, x, a, gt_A, output_file, cmap=cm.Spectral, mult
     
     return min_ged 
     
+import numpy as np
+import networkx as nx
+from matplotlib import cm
+
+def graph_edit_distance_nx_norm(chmm, x, a, gt_A, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30):
+    # pdb.set_trace()
+    states = chmm.decode(x, a)[1]
+
+    v = np.unique(states)
+    if multiple_episodes:
+        T = chmm.C[:, v][:, :, v][:-1, 1:, 1:]
+        v = v[1:]
+    else:
+        T = chmm.C[:, v][:, :, v]
+    A = T.sum(0)
+    A /= A.sum(1, keepdims=True)    
+    
+    # Create graphs from adjacency matrices
+    gt_G = nx.from_numpy_array(gt_A)
+    constructed_G = nx.from_numpy_array(A)
+    
+    # Create an empty graph G0 with the same number of nodes as gt_G and constructed_G
+    G0 = nx.empty_graph(n=len(gt_G))
+    
+    # Compute GED
+    cost_gt_constructed = nx.optimize_edit_paths(constructed_G, gt_G, timeout=100)
+    cost_gt_G0 = nx.optimize_edit_paths(gt_G, G0, timeout=100)
+    cost_constructed_G0 = nx.optimize_edit_paths(constructed_G, G0, timeout=100)
+    
+    try:
+        min_ged_gt_constructed = next(cost_gt_constructed)[-1]
+    except StopIteration:
+        min_ged_gt_constructed = np.nan
+    
+    try:
+        min_ged_gt_G0 = next(cost_gt_G0)[-1]
+    except StopIteration:
+        min_ged_gt_G0 = np.nan
+    
+    try:
+        min_ged_constructed_G0 = next(cost_constructed_G0)[-1]
+    except StopIteration:
+        min_ged_constructed_G0 = np.nan
+    
+    # Normalize GED
+    if not np.isnan(min_ged_gt_G0) and not np.isnan(min_ged_constructed_G0):
+        normalized_ged = min_ged_gt_constructed / (min_ged_gt_G0 + min_ged_constructed_G0)
+    else:
+        normalized_ged = np.nan
+    
+    return normalized_ged
+
 
 def return_A(
     chmm, x, a, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30
