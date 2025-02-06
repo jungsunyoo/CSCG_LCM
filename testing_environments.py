@@ -145,7 +145,274 @@ class Environment:
     def is_unrewarded_terminal(self, state:int) -> bool:
         return state in self.unrewarded_terminals
     
+class GridEnv(Environment):
+    """
+    A non-Markovian grid environment of size env_size (rows x cols), with states numbered:
 
+      1   2   3   ...   cols
+      cols+1  cols+2  ... 2*cols
+      ...
+      up to rows*cols
+
+    - The agent can move RIGHT (0), DOWN (1), LEFT (2), or UP (3).
+    - No self-transitions at borders:
+        If an action would go out of bounds, that action is not allowed from that state.
+    - "Cue" logic: must visit any state in cue_states to get +1 reward upon reaching
+      rewarded_terminal. If it hasn't visited a cue, it transitions instead to
+      an unrewarded terminal state (which yields -1).
+    """
+
+    def __init__(self, cue_states=[2], env_size=(4,4), rewarded_terminal=[16]):
+        """
+        cue_states       : list of states that serve as 'cues' (must be visited 
+                           to get +1 at terminal)
+        env_size         : (rows, cols)
+        rewarded_terminal: list of states that yield +1 if cue was visited, else -1
+        """
+        self.env_size = env_size
+        
+        # Build a mapping of (row, col) -> state (1-indexed)
+        self.pos_to_state = {}
+        state_counter = 0
+        for r in range(self.env_size[0]):
+            for c in range(self.env_size[1]):
+                state_counter += 1
+                self.pos_to_state[(r,c)] = state_counter
+        
+        self.state_to_pos = {s: rc for rc, s in self.pos_to_state.items()}
+
+        # In your original code, for each rewarded terminal, you define a 
+        # corresponding 'unrewarded_terminal' by shifting the index. 
+        # For example: if 16 is a rewarded terminal, 17 would be the unrewarded one, etc.
+        # We'll keep that logic, but adapt to however many rewarded terminals you have.
+        unrewarded_terminals = [s + state_counter for s in range(len(rewarded_terminal))]
+
+        # Start state is always 1 in this example, but you can change as needed.
+        start_state = 1
+
+        # Call super constructor (assuming 'Environment' base class)
+        super().__init__(rewarded_termimals=rewarded_terminal, 
+                         unrewarded_termimals=unrewarded_terminals,
+                         start=start_state,
+                         cues=cue_states)
+        
+        # Actions:
+        #  0 -> right  (0, +1)
+        #  1 -> down   (+1, 0)
+        #  2 -> left   (0, -1)
+        #  3 -> up     (-1, 0)
+        self.base_actions = {
+            0: (0, +1),   # right
+            1: (+1, 0),   # down
+            2: (0, -1),   # left
+            3: (-1, 0)    # up
+        }
+
+        # Precompute valid actions per state
+        self.valid_actions = self._build_valid_actions()
+
+        # Total states = actual grid states + # of unrewarded terminal states
+        self.num_unique_states = state_counter + len(self.unrewarded_terminals)
+
+        # Reset environment
+        self.reset()
+
+    def _build_valid_actions(self):
+        """
+        Precompute valid actions for each non-terminal state.
+        Valid = leads to a different state (i.e., in-bounds).
+        """
+        valid_dict = {}
+        rows, cols = self.env_size
+
+        for r in range(rows):
+            for c in range(cols):
+                s = self.pos_to_state[(r, c)]
+                valid_actions_s = []
+                for a, (dr, dc) in self.base_actions.items():
+                    nr, nc = r + dr, c + dc
+                    # Check in-bounds
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        next_s = self.pos_to_state[(nr, nc)]
+                        # Only include if next_s != s (avoid self-transition)
+                        if next_s != s:
+                            valid_actions_s.append(a)
+                valid_dict[s] = valid_actions_s
+
+        # For terminal states, no valid actions
+        for terminal in self.rewarded_terminals + self.unrewarded_terminals:
+            valid_dict[terminal] = []
+
+        return valid_dict
+
+    def reset(self):
+        """
+        Reset environment to start state and mark cue as not visited.
+        Returns current_state.
+        """
+        self.current_state = self.start_state
+        self.visited_cue = False
+        return self.current_state
+
+    def get_valid_actions(self, state=None):
+        """
+        Return the list of valid actions from the (current) state.
+        """
+        if state is None:
+            state = self.current_state
+        return self.valid_actions[state]
+
+    def step(self, action):
+        """
+        Step in environment with a guaranteed-valid action. 
+        Returns (next_state, reward, done).
+        """
+        if action not in self.get_valid_actions():
+            raise ValueError(f"Action {action} is not valid from state {self.current_state}.")
+
+        # If already in terminal, no change
+        if self.current_state in (self.rewarded_terminals + self.unrewarded_terminals):
+            return self.current_state, 0, True
+
+        # Compute next state
+        r, c = self.state_to_pos[self.current_state]
+        dr, dc = self.base_actions[action]
+        nr, nc = r + dr, c + dc
+        next_state = self.pos_to_state[(nr, nc)]
+
+        # Check if next_state is a cue
+        if next_state in self.cue_states:
+            self.visited_cue = True
+
+        reward = 0
+        done = False
+
+        # If next_state is a rewarded terminal
+        if next_state in self.rewarded_terminals:
+            done = True
+            if self.visited_cue:
+                reward = +1
+            else:
+                reward = -1
+                # Move to the corresponding "unrewarded" terminal label
+                idx = self.rewarded_terminals.index(next_state)
+                next_state = self.unrewarded_terminals[idx]
+
+        # Update current state
+        self.current_state = next_state
+        return next_state, reward, done
+    
+        # Create the graph
+    def plot_graph(self, T, niter,
+                highlight_node=-1, highlight_node_2=-1,
+                save=True, savename='img'):
+        """
+        Plots the state transition graph using NetworkX.
+        - T: transition probability matrix, shape [n_state, n_action, n_state]
+        - niter: current iteration index (for the figure title)
+        - highlight_node: optional state to highlight (e.g., in red)
+        - highlight_node_2: optional second state to highlight (e.g., in yellow)
+        - save: whether to save the figure as an image
+        - savename: prefix for the saved image file
+        """
+
+        # Create directed graph
+        G = nx.DiGraph()
+        n_state = T.shape[0]
+        n_action = T.shape[1]
+
+        # Add nodes (we assume T includes all states 0..n_state-1 internally)
+        for s in range(n_state-1):
+            G.add_node(s+1)  # your code indexes nodes as 1..n_state
+
+        # Define colors/labels for each action
+        action_colors = {0: "blue",   # Right
+                        1: "green",  # Down
+                        2: "orange", # Left
+                        3: "purple"} # Up
+        action_labels = {0: "R", 1: "D", 2: "L", 3: "U"}
+
+        # Add edges
+        edge_colors = []
+        for s in range(n_state):
+            for a in range(n_action):
+                for s_next in range(n_state):
+                    prob = T[s, a, s_next]
+                    if prob > 0:
+                        # Create a directed edge from s to s_next
+                        lbl = f"{action_labels[a]}, p={prob:.1f}"
+                        G.add_edge(s, s_next, label=lbl)
+
+                        # Choose an edge color based on the action
+                        edge_colors.append(action_colors[a])
+
+        # Build position dictionary for states
+        pos = {}
+        horizontal_scale = 3
+        vertical_scale = 3
+        offset = 0.2
+
+        # For a 4x4 grid, you typically have states 0..15 internally.
+        # If self.env_size = (4,4), that means 4 rows, 4 cols.
+        # row = s // cols, col = s % cols  => row = s//4, col = s%4
+        for s in range(n_state):
+            row = s // self.env_size[1]  # self.env_size=(4,4)-> row = s // 4
+            col = s % self.env_size[1]   # col = s % 4
+            # Node indexing in your environment might be 1-based => map s->s+1
+            # Plot them with negative row so the first row appears on top
+            pos[s+1] = (col * horizontal_scale, -row * vertical_scale)
+
+            # If s is an unrewarded terminal, offset it next to the associated rewarded terminal
+            if s in self.unrewarded_terminals:
+                idx = self.unrewarded_terminals.index(s)
+                rew_terminal = self.rewarded_terminals[idx]
+                pos[s] = (pos[rew_terminal][0] + offset, 
+                        pos[rew_terminal][1] + offset)
+            elif s > self.num_unique_states:
+                # If you have extra states or clones, you might offset them from a 'clone_dict' etc.
+                # This is just your original logic. If you don't need it, remove it.
+                pos[s] = (pos[clone_dict[s]][0] + offset, 
+                        pos[clone_dict[s]][1] + offset)
+
+        # Draw figure
+        plt.figure(figsize=(12, 8))
+
+        # Determine node colors
+        colors = []
+        for node in G.nodes():
+            state = int(node)
+            if state == highlight_node:
+                colors.append("red")
+            elif state == highlight_node_2:
+                colors.append("yellow")
+            # elif self.is_rewarded_terminal(state):
+            #     colors.append("lightgreen")
+            # elif self.is_unrewarded_terminal(state):
+            #     colors.append("lightcoral")
+            else:
+                colors.append("lightblue")
+
+        # Draw nodes, labels
+        nx.draw_networkx_nodes(G, pos, node_color=colors, node_size=1200)
+        nx.draw_networkx_labels(G, pos, font_size=20, font_color='black')
+
+        # Get edges in the order added to match edge_colors
+        edges = list(G.edges())
+        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=edge_colors,
+                            arrowstyle='->', arrowsize=20, width=3)
+        nx.draw_networkx_edge_labels(G, pos,
+                                    edge_labels=nx.get_edge_attributes(G, 'label'),
+                                    font_size=10, label_pos=0.5)
+
+        plt.axis('off')
+        plt.title(f"Graph at iteration {niter}", size=20)
+        plt.tight_layout()
+
+        # Save figure if desired
+        final_name = f"{savename}_iteration_{niter}"
+        if save:
+            plt.savefig(final_name)
+        plt.show()
 
 class GridEnvRightDownNoSelf(Environment):
     """
