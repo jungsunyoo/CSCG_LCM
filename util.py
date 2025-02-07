@@ -1,297 +1,589 @@
-
-## A Few utility functions
-
 import numpy as np
-# from chmm_actions import CHMM, forwardE, datagen_structured_obs_room
+from collections import defaultdict
+import random
+from tqdm import trange
+import copy
+import networkx as nx
 import matplotlib.pyplot as plt
+import sys
 import igraph
 from matplotlib import cm, colors
-import os
-import networkx as nx
+random.seed(42)
+import seaborn as sns
+from testing_environments import ContinuousTMaze, GridEnvRightDownNoCue, GridEnvRightDownNoSelf, GridEnvDivergingMultipleReward, GridEnvDivergingSingleReward
 
-custom_colors = (
-    np.array(
-        [
-            [214, 214, 214],
-            [85, 35, 157],
-            [253, 252, 144],
-            [114, 245, 144],
-            [151, 38, 20],
-            [239, 142, 192],
-            [214, 134, 48],
-            [140, 194, 250],
-            [72, 160, 162],
-        ]
-    )
-    / 256
-)
-if not os.path.exists("figures"):
-    os.makedirs("figures")
+ 
+def generate_dataset(env, n_episodes=10, max_steps=20):
+    """
+    Run 'n_episodes' episodes in the environment. Each episode ends
+    either when the environment signals 'done' or when we hit 'max_steps'.
 
+    Returns:
+        A list of (state_sequence, action_sequence) pairs.
+        - state_sequence: list of visited states
+        - action_sequence: list of chosen actions
+    """
+    dataset = []
 
-def graph_edit_distance_nx(chmm, x, a, gt_A, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30):
-    # pdb.set_trace()
-    states = chmm.decode(x, a)[1]
+    for episode_idx in range(n_episodes):
+        # Prepare lists to store states & actions for this episode
+        states = []
+        actions = []
 
-    v = np.unique(states)
-    if multiple_episodes:
-        T = chmm.C[:, v][:, :, v][:-1, 1:, 1:]
-        v = v[1:]
-    else:
-        T = chmm.C[:, v][:, :, v]
-    A = T.sum(0)
-    A /= A.sum(1, keepdims=True)    
+        # Reset env to start a new episode
+        state = env.reset()
+
+        for t in range(max_steps):
+            states.append(state)
+
+            valid_actions = env.get_valid_actions(state)
+            if not valid_actions:
+                # No valid actions => we must be in a terminal or stuck
+                break
+
+            # Example: pick a random valid action
+            action = np.random.choice(valid_actions)
+            actions.append(action)
+
+            # Step in the environment
+            next_state, reward, done = env.step(action)
+            state = next_state
+
+            if done:
+                # Also record the final state
+                states.append(state)
+
+                # if state == 16:
+                #     print(f"rewarded path: {states}")
+                break
+                
+        # Store (states, actions) for this episode
+        if done: # only append datasets that reached terminal state
+            dataset.append([states, actions])
+
+    return dataset
+
+def TM(dataset):
+    """
+    Given a dataset of episodes, each episode being (states_seq, actions_seq),
+    build a 3D count matrix of shape [max_state+1, max_action+1, max_state+1].
     
-    # ged
-    gt_G = nx.from_numpy_array(gt_A)
-    constructed_G = nx.from_numpy_array(A)    
+    Returns:
+        transition_counts (np.ndarray): counts[s, a, s_next]
+            The number of times we observed (state=s) --(action=a)--> (next_state=s_next).
+    """
+    # 1) Collect all observed states and actions to determine indexing bounds
+    all_states = set()
+    all_actions = set()
     
-    cost = nx.optimize_edit_paths(constructed_G, gt_G, timeout=100)
-    try:
-        first_cost = next(cost)
-        min_ged = first_cost[-1]
-    except StopIteration:
-        min_ged = np.nan    
-    # if next(cost): 
-    #     min_ged = next(cost)[-1]
-    # else: 
-    #     min_ged = np.nan
-    # if cost: 
-    #     min_ged = next(cost)[-1]
-    # else: 
-    #     min_ged = np.nan    
+    for states_seq, actions_seq in dataset:
+        for s in states_seq:
+            all_states.add(s)
+        for a in actions_seq:
+            all_actions.add(a)
     
-    return min_ged 
+    max_state = max(all_states) if all_states else 0
+    max_action = max(all_actions) if all_actions else 0
     
-import numpy as np
-import networkx as nx
-from matplotlib import cm
-
-def graph_edit_distance_nx_norm(chmm, x, a, gt_A, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30):
-    # pdb.set_trace()
-    states = chmm.decode(x, a)[1]
-
-    v = np.unique(states)
-    if multiple_episodes:
-        T = chmm.C[:, v][:, :, v][:-1, 1:, 1:]
-        v = v[1:]
-    else:
-        T = chmm.C[:, v][:, :, v]
-    A = T.sum(0)
-    A /= A.sum(1, keepdims=True)    
+    # 2) Initialize a 3D count array
+    #    We'll assume states range from 0..max_state
+    #    and actions range from 0..max_action
+    transition_counts = np.zeros((max_state+1, max_action+1, max_state+1), dtype=int)
     
-    # Create graphs from adjacency matrices
-    gt_G = nx.from_numpy_array(gt_A)
-    constructed_G = nx.from_numpy_array(A)
+    # 3) Fill in the counts by iterating over each episode's transitions
+    for states_seq, actions_seq in dataset:
+        # for each step t in the episode
+        # print(len(states_seq), len(actions_seq))
+        for t in range(len(actions_seq)):
+            s = states_seq[t]
+            a = actions_seq[t]
+            s_next = states_seq[t+1]
+            transition_counts[s, a, s_next] += 1
     
-    # Create an empty graph G0 with the same number of nodes as gt_G and constructed_G
-    G0 = nx.empty_graph(n=len(gt_G))
+    return transition_counts
+
+def successor_representations(dataset, gamma=0.9, alpha=0.1, n_states=None, n_passes=1):
+    """
+    Learns the successor representation M via a TD-like update on raw trajectories:
+        M[s, :] <- M[s, :] + alpha * ( e_s + gamma*M[s_next, :] - M[s, :] ).
     
-    # Compute GED
-    cost_gt_constructed = nx.optimize_edit_paths(constructed_G, gt_G, timeout=100)
-    cost_gt_G0 = nx.optimize_edit_paths(gt_G, G0, timeout=100)
-    cost_constructed_G0 = nx.optimize_edit_paths(constructed_G, G0, timeout=100)
+    Parameters
+    ----------
+    states : list or np.ndarray
+        Sequence of states visited (s_0, s_1, ..., s_T). 
+    gamma : float
+        Discount factor.
+    alpha : float
+        Learning rate.
+    n_states : int
+        Total number of discrete states. If None, we'll infer from max state in 'states'.
+    n_passes : int
+        Number of passes (epochs) over the entire dataset to refine the estimate.
+
+    Returns
+    -------
+    M : np.ndarray of shape (n_states, n_states)
+        Learned SR matrix.
+    """
+    if n_states is None:
+        # n_states = int(np.max(states))  # infer if states are 0-based
+        # n_states = max(max(state) for state in states)
+        n_states = max(max(pair[0]) for pair in dataset) + 1
+
+    # Initialize
+    M = np.zeros((n_states, n_states))
     
-    try:
-        min_ged_gt_constructed = next(cost_gt_constructed)[-1]
-    except StopIteration:
-        min_ged_gt_constructed = np.nan
+    # for _ in range(n_passes):
+    for states, actions in dataset:
+        for t in range(len(states) - 1):
+            s  = states[t]
+            s_next = states[t+1]
+
+            # One-hot vector for s
+            e_s = np.zeros(n_states)
+            e_s[s] = 1.0
+
+            # TD update
+            M[s, :] += alpha * (e_s + gamma * M[s_next, :] - M[s, :])
+            
+    return M
+
+def successor_representations(dataset, gamma=0.9, alpha=0.1, n_states=None, n_passes=1):
+    """
+    Learns the successor representation M via a TD-like update on raw trajectories:
+        M[s, :] <- M[s, :] + alpha * ( e_s + gamma*M[s_next, :] - M[s, :] ).
     
-    try:
-        min_ged_gt_G0 = next(cost_gt_G0)[-1]
-    except StopIteration:
-        min_ged_gt_G0 = np.nan
+    Parameters
+    ----------
+    states : list or np.ndarray
+        Sequence of states visited (s_0, s_1, ..., s_T). 
+    gamma : float
+        Discount factor.
+    alpha : float
+        Learning rate.
+    n_states : int
+        Total number of discrete states. If None, we'll infer from max state in 'states'.
+    n_passes : int
+        Number of passes (epochs) over the entire dataset to refine the estimate.
+
+    Returns
+    -------
+    M : np.ndarray of shape (n_states, n_states)
+        Learned SR matrix.
+    """
+    if n_states is None:
+        # n_states = int(np.max(states))  # infer if states are 0-based
+        # n_states = max(max(state) for state in states)
+        n_states = max(max(pair[0]) for pair in dataset)
+    # print(n_states)
+    # Initialize
+    M = np.zeros((n_states, n_states))
     
-    try:
-        min_ged_constructed_G0 = next(cost_constructed_G0)[-1]
-    except StopIteration:
-        min_ged_constructed_G0 = np.nan
+    for _ in range(n_passes):
+        for states, actions in dataset:
+            for t in range(len(states) - 1):
+                s  = states[t]-1
+                s_next = states[t+1]-1
+                # print(s,s_next)
+                # One-hot vector for s
+                e_s = np.zeros(n_states)
+                e_s[s] = 1.0
+
+                # TD update
+                # M[s, :] += alpha * (e_s + gamma * M[s_next, :] - M[s, :])
+                M[s] = (1-alpha) * M[s] + alpha * (e_s + gamma * M[s_next])
+            # now do a final update for the last state
+            s_terminal = states[-1] - 1
+            e_s = np.zeros(n_states)
+            e_s[s_terminal] = 1.0
+            M[s_terminal] = (1 - alpha) * M[s_terminal] + alpha * e_s
+    return M
+# def update_SR(self, s, s_new):
+#     self.M[s] = (1-self.alpha)* self.M[s] + self.alpha * ( self.onehot[s] + self.gamma * self.M[s_new]  )
+
+def predecessor_representations(dataset, gamma=0.9, alpha=0.1, n_states=None, n_passes=1):
+    """
+    Learns the predecessor representation matrix P via a TD-like update on raw trajectories:
+        P[s_next, :] <- P[s_next, :] + alpha * ( e_{s_next} + gamma * P[s, :] - P[s_next, :] ).
+
+    Parameters
+    ----------
+    dataset : list of (states, actions)
+        Each element is a tuple: (states, actions) where:
+           - states is a list/array: s_0, s_1, ..., s_T
+           - actions can be ignored here; we only need states for SR/PR learning.
+    gamma : float
+        Discount factor.
+    alpha : float
+        Learning rate.
+    n_states : int or None
+        Total number of discrete states. If None, will infer from max in dataset.
+        Assumes states are 1-based, so we do s-1 for zero-based indexing.
+    n_passes : int
+        Number of passes (epochs) over the entire dataset to refine the estimate.
+
+    Returns
+    -------
+    P : np.ndarray of shape (n_states, n_states)
+        Learned PR matrix.  Row i is the predecessor representation vector for state i.
+    """
+    # Infer number of states if not given
+    if n_states is None:
+        # e.g. if states are 1-based, we take the max of them
+        n_states = max(max(seq[0]) for seq in dataset)
+
+    # Initialize
+    P = np.zeros((n_states, n_states))
+
+    for _ in range(n_passes):
+        for states, actions in dataset:
+            states = np.array(states)
+
+            # Optional: "first-state update" if you think of s_0 as having no predecessor
+            s_first = states[0] - 1
+            e_first = np.zeros(n_states)
+            e_first[s_first] = 1.0
+            # P[s_first, :] <- P[s_first, :] + alpha*( e_first - P[s_first, :] )
+            P[s_first] = (1 - alpha)*P[s_first] + alpha * e_first
+
+            # For each transition (s -> s_next), update row of s_next
+            for t in range(len(states) - 1):
+                s = states[t]     - 1
+                s_next = states[t+1] - 1
+
+                e_s_next = np.zeros(n_states)
+                e_s_next[s_next] = 1.0
+
+                # TD update:
+                # P[s_next, :] <- P[s_next, :] + alpha*( e_s_next + gamma*P[s, :] - P[s_next, :] )
+                P[s_next] = (1 - alpha)*P[s_next] + alpha*(e_s_next + gamma * P[s])
+                
+    return P
+
+def successor_representations_action(dataset, gamma=0.9, alpha=0.1, n_states=None, n_passes=1):
+    """
+    Learns the successor representation M via a TD-like update on raw trajectories:
+        M[s, :] <- M[s, :] + alpha * ( e_s + gamma*M[s_next, :] - M[s, :] ).
     
-    # Normalize GED
-    if not np.isnan(min_ged_gt_G0) and not np.isnan(min_ged_constructed_G0):
-        normalized_ged = min_ged_gt_constructed / (min_ged_gt_G0 + min_ged_constructed_G0)
-    else:
-        normalized_ged = np.nan
+    Parameters
+    ----------
+    states : list or np.ndarray
+        Sequence of states visited (s_0, s_1, ..., s_T). 
+    gamma : float
+        Discount factor.
+    alpha : float
+        Learning rate.
+    n_states : int
+        Total number of discrete states. If None, we'll infer from max state in 'states'.
+    n_passes : int
+        Number of passes (epochs) over the entire dataset to refine the estimate.
+
+    Returns
+    -------
+    M : np.ndarray of shape (n_states, n_states)
+        Learned SR matrix.
+    """
+    if n_states is None:
+        # n_states = int(np.max(states))  # infer if states are 0-based
+        # n_states = max(max(state) for state in states)
+        n_states = max(max(pair[0]) for pair in dataset) 
+        n_action = max(max(pair[1]) for pair in dataset) +1
+
+    # Initialize
+    M = np.zeros((n_states, n_action, n_states))
     
-    return normalized_ged
+    # for _ in range(n_passes):
+    for states, actions in dataset:
+        
+        for t in range(len(states) - 1):
+            s  = states[t]-1
+            a = actions[t]
+            s_next = states[t+1]-1
+            
+            # One-hot vector for s
+            e_s = np.zeros(n_states)
+            e_s[s] = 1.0
 
+            # TD update
+            M[s, a, :] += alpha * (e_s + gamma * M[s_next, :,:] - M[s, a,:])
+            
+    return M
 
-def return_A(
-    chmm, x, a, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30
-):
-    # pdb.set_trace()
-    states = chmm.decode(x, a)[1]
-
-    v = np.unique(states)
-    if multiple_episodes:
-        T = chmm.C[:, v][:, :, v][:-1, 1:, 1:]
-        v = v[1:]
-    else:
-        T = chmm.C[:, v][:, :, v]
-    A = T.sum(0)
-    A /= A.sum(1, keepdims=True)
-
-    # g = igraph.Graph.Adjacency((A > 0).tolist())
-    # node_labels = np.arange(x.max() + 1).repeat(chmm.n_clones)[v]
-    # if multiple_episodes:
-    #     node_labels -= 1
-    # colors = [cmap(nl)[:3] for nl in node_labels / node_labels.max()]
-    # # out=[]
-    # out = igraph.plot(
-    #     g,
-    #     output_file,
-    #     layout=g.layout("kamada_kawai"),
-    #     vertex_color=colors,
-    #     vertex_label=v,
-    #     vertex_size=vertex_size,
-    #     margin=50,
-    # )
-
-    return A
+def compute_eligibility_traces(states, n_states, gamma=0.9, lam=0.8):
+    """
+    Compute eligibility traces for a single episode's state sequence.
     
-def plot_graph(
-    chmm, x, a, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30
-):
-    # pdb.set_trace()
-    states = chmm.decode(x, a)[1]
+    Parameters
+    ----------
+    states : list or 1D array
+        Sequence of visited states (zero-based indices).
+    n_states : int
+        Total number of discrete states.
+    gamma : float
+        Discount factor.
+    lam : float
+        Lambda parameter for eligibility decay.
+    
+    Returns
+    -------
+    E : np.ndarray of shape (len(states), n_states)
+        E[t, s] = the eligibility of state s after observing the t-th state in 'states'.
+    """
+    # We'll keep a running "eligibility vector" e for all states,
+    # and store its value at each step in E.
+    E = np.zeros((len(states), n_states))  # E[t, s] = eligibility of state s at time t
+    
+    e = np.zeros(n_states)  # current eligibility vector (initially all zeros)
+    
+    # Iterate over each visited state in the trajectory
+    for t, s in enumerate(states):
+        # Decay the existing eligibilities
+        e *= gamma * lam
+        
+        # Increment eligibility for the current state by 1
+        e[s] += 1.0
+        
+        # Store a snapshot of the eligibility vector at this time step
+        E[t] = e.copy()
+        
+    return E
 
-    v = np.unique(states)
-    if multiple_episodes:
-        T = chmm.C[:, v][:, :, v][:-1, 1:, 1:]
-        v = v[1:]
-    else:
-        T = chmm.C[:, v][:, :, v]
-    A = T.sum(0)
-    A /= A.sum(1, keepdims=True)
+def compute_transition_entropies(transition_probs, tol=1e-9):
+    """
+    Given transition_probs[s, a, s_next], compute the Shannon entropy
+    (in bits, i.e. log base 2) of each (s, a) distribution.
+    
+    Returns:
+        entropies: A 2D array of shape [S, A], where entropies[s, a]
+                   is the entropy of transition_probs[s, a, :].
+    
+    Notes:
+      - If the total probability mass for (s, a) is ~0 (i.e. no data),
+        we set entropy to 0 by default (or you could mark it as NaN).
+      - We ignore states that are purely out-of-bounds or never visited.
+    """
+    S, A, _ = transition_probs.shape
+    entropies = np.zeros((S, A), dtype=float)
+    
+    for s in range(S):
+        for a in range(A):
+            dist = transition_probs[s, a]  # shape = [S]
+            
+            # Sum of probabilities (should be ~1 if we have data)
+            total_prob = dist.sum()
+            if total_prob < tol:
+                # Means no data or zero-prob distribution
+                entropies[s, a] = 0.0
+                continue
+            
+            # Identify the non-zero probabilities (to avoid log(0))
+            p_nonzero = dist[dist > tol]
+            
+            # Normalize them so they sum to 1
+            p_nonzero /= p_nonzero.sum()
+            
+            # Shannon entropy in bits
+            #  E = - sum(p * log2(p))
+            ent = -np.sum(p_nonzero * np.log2(p_nonzero))
+            entropies[s, a] = ent
+            
+    return entropies
 
-    g = igraph.Graph.Adjacency((A > 0).tolist())
-    node_labels = np.arange(x.max() + 1).repeat(chmm.n_clones)[v]
-    if multiple_episodes:
-        node_labels -= 1
-    colors = [cmap(nl)[:3] for nl in node_labels / node_labels.max()]
-    # out=[]
-    out = igraph.plot(
-        g,
-        output_file,
-        layout=g.layout("kamada_kawai"),
-        vertex_color=colors,
-        vertex_label=v,
-        vertex_size=vertex_size,
-        margin=50,
-    )
+def find_stochastic_state_actions_by_entropy(entropies, eps=1e-9):
+    """
+    Given a 2D array of entropies[s,a], return a list of (s,a) pairs
+    that are strictly > eps in entropy (i.e. non-deterministic).
+    """
+    stochastic_pairs = []
+    S, A = entropies.shape
+    for s in range(S):
+        for a in range(A):
+            # If entropy is basically 0 => deterministic
+            if entropies[s, a] > eps:
+                stochastic_pairs.append((s,a))
+    return stochastic_pairs
 
-    return out, v, g
+# Functions for contingency & splitting
 
-def plot_graph_infomap(
-    chmm, x, a, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30
-):
-    states = chmm.decode(x, a)[1]
+def get_unique_states(dataset):
+    all_states = []
+    for states_seq, _ in dataset:
+        all_states.extend(states_seq)  # Flatten the list
+    unique_states = np.unique(all_states)
+    return unique_states
 
-    v = np.unique(states)
-    if multiple_episodes:
-        T = chmm.C[:, v][:, :, v][:-1, 1:, 1:]
-        v = v[1:]
-    else:
-        T = chmm.C[:, v][:, :, v]
-    A = T.sum(0)
-    A /= A.sum(1, keepdims=True)
+def get_unique_states_from_env(env):
+    return [x for x in env.pos_to_state.values()]
 
-    g = igraph.Graph.Adjacency((A > 0).tolist())
-    node_labels = np.arange(x.max() + 1).repeat(chmm.n_clones)[v]
-    if multiple_episodes:
-        node_labels -= 1
-    colors = [cmap(nl)[:3] for nl in node_labels / node_labels.max()]
-    comms = g.community_infomap()
-    print(len(comms))
+def has_state(sequence, state):
+    """Return True if the episode's state sequence contains state=5."""
+    return state in sequence
 
-    out = igraph.plot(
-        comms,
-        output_file,
-        layout=g.layout("kamada_kawai"),
-        mark_groups=True,
-        vertex_label=v,
-        vertex_size=vertex_size,
-        margin=50,
-    )
+def has_transition(s,sprime,sequence):
+    """Return True if the episode's state sequence contains a transition 15->16."""
+    for i in range(len(sequence) - 1):
+        if sequence[i] == s and sequence[i + 1] == sprime:
+            return True
+    return False
 
-    return len(comms)
+# s=12
+# sprime=16
+# sprime2 = 17
+def calculate_contingency(dataset, s, sprime, sprime2):
+    unique_states = get_unique_states(dataset)
+    contingency_states = []
+    for curr_state in unique_states:
+        # if curr_state<100:
+        if (curr_state < s or curr_state > 17):    # maybe here
+            # print(curr_state)
+            # episodes_with_state = 0
+            # episodes_with_state_and_transition = 0
+            # other =0
+            # curr_state = 6
 
-def plot_graph_modularity(
-    chmm, x, a, output_file, cmap=cm.Spectral, multiple_episodes=False, vertex_size=30
-):
-    states = chmm.decode(x, a)[1]
+            total = 0
+            a=0
+            b=0
+            c=0
+            d=0
+            conditioned_contingency=0
+            # print("Current state: {}".format(curr_state))
+            for states_seq, actions_seq in dataset:
+                if has_state(states_seq,s):
+                    total += 1
+                    if has_state(states_seq, curr_state):
+                    
+                        
+                        # episodes_with_state += 1
+                        if has_transition(s,sprime,states_seq): 
+                            # episodes_with_state_and_transition += 1   
+                            a += 1
+                            # if curr_state==18:
+                            #     print('a:')
+                            #     print(states_seq)
+                            # print('transition: {}'.format(states_seq))
+                        elif has_transition(s,sprime2, states_seq): 
+                            # print(states_seq)
+                            b+=1
+                            # if curr_state==18:
+                            #     print('b:')
+                            #     print(states_seq)
+                    else: 
+                        # print('here')
+                        if has_transition(s,sprime,states_seq): 
+                            # episodes_with_state_and_transition += 1   
+                            c += 1
+                            # if curr_state==18:
+                            #     print('c:')
+                            #     print(states_seq)                            
+                            
+                            # print('transition: {}'.format(states_seq))
+                        elif has_transition(s,sprime2, states_seq): 
+                            # print(states_seq)
+                            d+=1
+                            # if curr_state==18:
+                            #     print('d:')
+                            #     print(states_seq)                            
+                    assert total == a+b+c+d
+            # if curr_state == 18: 
+            #     print(a/(a+b), d/(c+d))
+            #     print(a,b,c,d)
+            # if a+b != 0: 
+            #     print("forward contingency: {}".format(a/(a+b)))
+            # else: 
+            #     print("no forward contingency")
+            # if c+d != 0: 
+            #     print("backward contingency: {}".format(d/(c+d)))
+            # else: 
+            #     print("no backward contingency")
+            if a+b !=0 and c+d != 0: 
+                # if (a/(a+b)==1 and d/(c+d)==1):
+                if a/(a+b)==1: # and d/(c+d)==1):
+                    
+                    contingency_states.append(curr_state)
+        print(f"state {curr_state} has a value {a} and b value {b} leading to a/(a+b) = {a/(a+b) if a+b != 0 else -1}")
+        # print(f"state {curr_state} has a value {a} and c value {c} leading to a/(a+c) = {a/(a+c) if a+c != 0 else -1}")
+        
+    print(f"contigency states: {contingency_states}")
+    return contingency_states
 
-    v = np.unique(states)
-    if multiple_episodes:
-        T = chmm.C[:, v][:, :, v][:-1, 1:, 1:]
-        v = v[1:]
-    else:
-        T = chmm.C[:, v][:, :, v]
-    A = T.sum(0)
-    A /= A.sum(1, keepdims=True)
+def calculate_contingency_tmaze(dataset, s, sprime, sprime2):
+    unique_states = get_unique_states(dataset)
+    contingency_states = []
+    for curr_state in unique_states:
+        # if curr_state<100:
+        # if (curr_state < s or curr_state > 17):
+            # print(curr_state)
+            # episodes_with_state = 0
+            # episodes_with_state_and_transition = 0
+            # other =0
+            # curr_state = 6
 
-    g = igraph.Graph.Adjacency((A > 0).tolist())
+        total = 0
+        a=0
+        b=0
+        c=0
+        d=0
+        conditioned_contingency=0
+        # print("Current state: {}".format(curr_state))
+        for states_seq, actions_seq in dataset:
+            if has_state(states_seq,s):
+                total += 1
+                if has_state(states_seq, curr_state):
+                
+                    
+                    # episodes_with_state += 1
+                    if has_transition(s,sprime,states_seq): 
+                        # episodes_with_state_and_transition += 1   
+                        a += 1
+                        # if curr_state==18:
+                        #     print('a:')
+                        #     print(states_seq)
+                        # print('transition: {}'.format(states_seq))
+                    elif has_transition(s,sprime2, states_seq): 
+                        # print(states_seq)
+                        b+=1
+                        # if curr_state==18:
+                        #     print('b:')
+                        #     print(states_seq)
+                else: 
+                    # print('here')
+                    if has_transition(s,sprime,states_seq): 
+                        # episodes_with_state_and_transition += 1   
+                        c += 1
+                        # if curr_state==18:
+                        #     print('c:')
+                        #     print(states_seq)                            
+                        
+                        # print('transition: {}'.format(states_seq))
+                    elif has_transition(s,sprime2, states_seq): 
+                        # print(states_seq)
+                        d+=1
+                        # if curr_state==18:
+                        #     print('d:')
+                        #     print(states_seq)                            
+                # assert total == a+b+c+d
+        # if curr_state == 18: 
+        #     print(a/(a+b), d/(c+d))
+        #     print(a,b,c,d)
+        # if a+b != 0: 
+        #     print("forward contingency: {}".format(a/(a+b)))
+        # else: 
+        #     print("no forward contingency")
+        # if c+d != 0: 
+        #     print("backward contingency: {}".format(d/(c+d)))
+        # else: 
+        #     print("no backward contingency")
+        if a+b !=0 and c+d != 0: 
+            # if (a/(a+b)==1 and d/(c+d)==1):
+            if a/(a+b)==1: # and d/(c+d)==1):
+                
+                contingency_states.append(curr_state)
 
-    # Convert the directed graph to an undirected graph
-    g = g.as_undirected()
+    return contingency_states
 
-    node_labels = np.arange(x.max() + 1).repeat(chmm.n_clones)[v]
-    if multiple_episodes:
-        node_labels -= 1
-    colors = [cmap(nl)[:3] for nl in node_labels / node_labels.max()]
-    # comms = g.community_infomap()
-
-    # print(len(comms))
-    # Detect communities using the Louvain method
-    communities = g.community_multilevel()
-    # print(communities)
-    modularity_score = g.modularity(communities)
-    # print("Modularity Score:", np.round(modularity_score,2))
-    # Optionally, visualize the graph with its communities
-    out = igraph.plot(communities, output_file, layout=g.layout("kamada_kawai"),
-                      mark_groups=True, vertex_label=v, vertex_size=vertex_size, margin=50,)
-    # out = igraph.plot(
-    #     comms,
-    #     output_file,
-    #     layout=g.layout("kamada_kawai"),
-    #     mark_groups=True,
-    #     vertex_label=v,
-    #     vertex_size=vertex_size,
-    #     margin=50,
-    # )
-
-    return out, modularity_score, v, g
-
-
-def get_mess_fwd(chmm, x, pseudocount=0.0, pseudocount_E=0.0):
-    n_clones = chmm.n_clones
-    E = np.zeros((n_clones.sum(), len(n_clones)))
-    last = 0
-    for c in range(len(n_clones)):
-        E[last : last + n_clones[c], c] = 1
-        last += n_clones[c]
-    E += pseudocount_E
-    norm = E.sum(1, keepdims=True)
-    norm[norm == 0] = 1
-    E /= norm
-    T = chmm.C + pseudocount
-    norm = T.sum(2, keepdims=True)
-    norm[norm == 0] = 1
-    T /= norm
-    T = T.mean(0, keepdims=True)
-    log2_lik, mess_fwd = forwardE(
-        T.transpose(0, 2, 1), E, chmm.Pi_x, chmm.n_clones, x, x * 0, store_messages=True
-    )
-    return mess_fwd
-
-
-def place_field(mess_fwd, rc, clone):
-    assert mess_fwd.shape[0] == rc.shape[0] and clone < mess_fwd.shape[1]
-    field = np.zeros(rc.max(0) + 1)
-    count = np.zeros(rc.max(0) + 1, int)
-    for t in range(mess_fwd.shape[0]):
-        r, c = rc[t]
-        field[r, c] += mess_fwd[t, clone]
-        count[r, c] += 1
-    count[count == 0] = 1
-    return field / count
+                
+def get_successor_states(transition_counts,s,a):
+    next_states = transition_counts[s,a]
+    sprime = np.where(next_states!=0)[0]
+    return sprime
