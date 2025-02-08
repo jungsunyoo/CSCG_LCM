@@ -58,7 +58,7 @@ class Environment:
     def plot_graph(self, T, niter, 
                 #    reward_terminal = [16], env_size = (4,4),
                    highlight_node=-1, highlight_node_2 = -1,
-                   save=True,savename='img'):
+                   save=False,savename='img'):
         """
         Function that draws the current environment
         !!!BASE VERSION ONLY WORKS FOR GRID ENVIRONMENTS!!!
@@ -326,116 +326,116 @@ class GridEnv(Environment):
         return next_state, reward, done
     
         # Create the graph
-    def plot_graph(self, T, niter,
-                highlight_node=-1, highlight_node_2=-1,
-                save=True, savename='img'):
-        """
-        Plots the state transition graph using NetworkX.
-        - T: transition probability matrix, shape [n_state, n_action, n_state]
-        - niter: current iteration index (for the figure title)
-        - highlight_node: optional state to highlight (e.g., in red)
-        - highlight_node_2: optional second state to highlight (e.g., in yellow)
-        - save: whether to save the figure as an image
-        - savename: prefix for the saved image file
-        """
+    # def plot_graph(self, T, niter,
+    #             highlight_node=-1, highlight_node_2=-1,
+    #             save=True, savename='img'):
+    #     """
+    #     Plots the state transition graph using NetworkX.
+    #     - T: transition probability matrix, shape [n_state, n_action, n_state]
+    #     - niter: current iteration index (for the figure title)
+    #     - highlight_node: optional state to highlight (e.g., in red)
+    #     - highlight_node_2: optional second state to highlight (e.g., in yellow)
+    #     - save: whether to save the figure as an image
+    #     - savename: prefix for the saved image file
+    #     """
 
-        # Create directed graph
-        G = nx.DiGraph()
-        n_state = T.shape[0]
-        n_action = T.shape[1]
+    #     # Create directed graph
+    #     G = nx.DiGraph()
+    #     n_state = T.shape[0]
+    #     n_action = T.shape[1]
 
-        # Add nodes (we assume T includes all states 0..n_state-1 internally)
-        for s in range(n_state-1):
-            G.add_node(s+1)  # your code indexes nodes as 1..n_state
+    #     # Add nodes (we assume T includes all states 0..n_state-1 internally)
+    #     for s in range(n_state-1):
+    #         G.add_node(s+1)  # your code indexes nodes as 1..n_state
 
-        # Define colors/labels for each action
-        action_colors = {0: "blue",   # Right
-                        1: "green",  # Down
-                        2: "orange", # Left
-                        3: "purple"} # Up
-        action_labels = {0: "R", 1: "D", 2: "L", 3: "U"}
+    #     # Define colors/labels for each action
+    #     action_colors = {0: "blue",   # Right
+    #                     1: "green",  # Down
+    #                     2: "orange", # Left
+    #                     3: "purple"} # Up
+    #     action_labels = {0: "R", 1: "D", 2: "L", 3: "U"}
 
-        # Add edges
-        edge_colors = []
-        for s in range(n_state):
-            for a in range(n_action):
-                for s_next in range(n_state):
-                    prob = T[s, a, s_next]
-                    if prob > 0:
-                        # Create a directed edge from s to s_next
-                        lbl = f"{action_labels[a]}, p={prob:.1f}"
-                        G.add_edge(s, s_next, label=lbl)
+    #     # Add edges
+    #     edge_colors = []
+    #     for s in range(n_state):
+    #         for a in range(n_action):
+    #             for s_next in range(n_state):
+    #                 prob = T[s, a, s_next]
+    #                 if prob > 0:
+    #                     # Create a directed edge from s to s_next
+    #                     lbl = f"{action_labels[a]}, p={prob:.1f}"
+    #                     G.add_edge(s, s_next, label=lbl)
 
-                        # Choose an edge color based on the action
-                        edge_colors.append(action_colors[a])
+    #                     # Choose an edge color based on the action
+    #                     edge_colors.append(action_colors[a])
 
-        # Build position dictionary for states
-        pos = {}
-        horizontal_scale = 3
-        vertical_scale = 3
-        offset = 0.2
+    #     # Build position dictionary for states
+    #     pos = {}
+    #     horizontal_scale = 3
+    #     vertical_scale = 3
+    #     offset = 0.2
 
-        # For a 4x4 grid, you typically have states 0..15 internally.
-        # If self.env_size = (4,4), that means 4 rows, 4 cols.
-        # row = s // cols, col = s % cols  => row = s//4, col = s%4
-        for s in range(n_state):
-            row = s // self.env_size[1]  # self.env_size=(4,4)-> row = s // 4
-            col = s % self.env_size[1]   # col = s % 4
-            # Node indexing in your environment might be 1-based => map s->s+1
-            # Plot them with negative row so the first row appears on top
-            pos[s+1] = (col * horizontal_scale, -row * vertical_scale)
+    #     # For a 4x4 grid, you typically have states 0..15 internally.
+    #     # If self.env_size = (4,4), that means 4 rows, 4 cols.
+    #     # row = s // cols, col = s % cols  => row = s//4, col = s%4
+    #     for s in range(n_state):
+    #         row = s // self.env_size[1]  # self.env_size=(4,4)-> row = s // 4
+    #         col = s % self.env_size[1]   # col = s % 4
+    #         # Node indexing in your environment might be 1-based => map s->s+1
+    #         # Plot them with negative row so the first row appears on top
+    #         pos[s+1] = (col * horizontal_scale, -row * vertical_scale)
 
-            # If s is an unrewarded terminal, offset it next to the associated rewarded terminal
-            if s in self.unrewarded_terminals:
-                idx = self.unrewarded_terminals.index(s)
-                rew_terminal = self.rewarded_terminals[idx]
-                pos[s] = (pos[rew_terminal][0] + offset, 
-                        pos[rew_terminal][1] + offset)
-            elif s > self.num_unique_states:
-                # If you have extra states or clones, you might offset them from a 'clone_dict' etc.
-                # This is just your original logic. If you don't need it, remove it.
-                pos[s] = (pos[clone_dict[s]][0] + offset, 
-                        pos[clone_dict[s]][1] + offset)
+    #         # If s is an unrewarded terminal, offset it next to the associated rewarded terminal
+    #         if s in self.unrewarded_terminals:
+    #             idx = self.unrewarded_terminals.index(s)
+    #             rew_terminal = self.rewarded_terminals[idx]
+    #             pos[s] = (pos[rew_terminal][0] + offset, 
+    #                     pos[rew_terminal][1] + offset)
+    #         elif s > self.num_unique_states:
+    #             # If you have extra states or clones, you might offset them from a 'clone_dict' etc.
+    #             # This is just your original logic. If you don't need it, remove it.
+    #             pos[s] = (pos[clone_dict[s]][0] + offset, 
+    #                     pos[clone_dict[s]][1] + offset)
 
-        # Draw figure
-        plt.figure(figsize=(12, 8))
+    #     # Draw figure
+    #     plt.figure(figsize=(12, 8))
 
-        # Determine node colors
-        colors = []
-        for node in G.nodes():
-            state = int(node)
-            if state == highlight_node:
-                colors.append("red")
-            elif state == highlight_node_2:
-                colors.append("yellow")
-            # elif self.is_rewarded_terminal(state):
-            #     colors.append("lightgreen")
-            # elif self.is_unrewarded_terminal(state):
-            #     colors.append("lightcoral")
-            else:
-                colors.append("lightblue")
+    #     # Determine node colors
+    #     colors = []
+    #     for node in G.nodes():
+    #         state = int(node)
+    #         if state == highlight_node:
+    #             colors.append("red")
+    #         elif state == highlight_node_2:
+    #             colors.append("yellow")
+    #         # elif self.is_rewarded_terminal(state):
+    #         #     colors.append("lightgreen")
+    #         # elif self.is_unrewarded_terminal(state):
+    #         #     colors.append("lightcoral")
+    #         else:
+    #             colors.append("lightblue")
 
-        # Draw nodes, labels
-        nx.draw_networkx_nodes(G, pos, node_color=colors, node_size=1200)
-        nx.draw_networkx_labels(G, pos, font_size=20, font_color='black')
+    #     # Draw nodes, labels
+    #     nx.draw_networkx_nodes(G, pos, node_color=colors, node_size=1200)
+    #     nx.draw_networkx_labels(G, pos, font_size=20, font_color='black')
 
-        # Get edges in the order added to match edge_colors
-        edges = list(G.edges())
-        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=edge_colors,
-                            arrowstyle='->', arrowsize=20, width=3)
-        nx.draw_networkx_edge_labels(G, pos,
-                                    edge_labels=nx.get_edge_attributes(G, 'label'),
-                                    font_size=10, label_pos=0.5)
+    #     # Get edges in the order added to match edge_colors
+    #     edges = list(G.edges())
+    #     nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=edge_colors,
+    #                         arrowstyle='->', arrowsize=20, width=3)
+    #     nx.draw_networkx_edge_labels(G, pos,
+    #                                 edge_labels=nx.get_edge_attributes(G, 'label'),
+    #                                 font_size=10, label_pos=0.5)
 
-        plt.axis('off')
-        plt.title(f"Graph at iteration {niter}", size=20)
-        plt.tight_layout()
+    #     plt.axis('off')
+    #     plt.title(f"Graph at iteration {niter}", size=20)
+    #     plt.tight_layout()
 
-        # Save figure if desired
-        final_name = f"{savename}_iteration_{niter}"
-        if save:
-            plt.savefig(final_name)
-        plt.show()
+    #     # Save figure if desired
+    #     final_name = f"{savename}_iteration_{niter}"
+    #     if save:
+    #         plt.savefig(final_name)
+    #     plt.show()
 
 class GridEnvRightDownNoSelf(Environment):
     """
