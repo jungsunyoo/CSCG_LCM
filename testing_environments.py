@@ -22,6 +22,7 @@ class Environment:
 
         self.clone_dict = dict()
         self.reverse_clone_dict = dict()
+        
 
     def reset(self):
         """
@@ -45,6 +46,14 @@ class Environment:
         we can either ignore or raise an Exception. We'll raise an error.
         """
         pass
+    
+    def add_clone_dict(self, new_clone, successor):
+        self.clone_dict[new_clone] = successor
+        
+
+    def add_reverse_clone_dict(self, new_clone, successor):
+        self.reverse_clone_dict[successor] = new_clone
+
 
     def plot_graph(self, T, niter, 
                 #    reward_terminal = [16], env_size = (4,4),
@@ -60,45 +69,59 @@ class Environment:
         # Add nodes
         for s in range(n_state-1):
             G.add_node(s+1)
-
-        # Add edges with color coding for each action (optional)
+            
+        # Define colors/labels for each action
+        action_colors = {0: "blue",   # Right
+                        1: "green",  # Down
+                        2: "orange", # Left
+                        3: "purple"} # Up
+        action_labels = {0: "R", 1: "D", 2: "L", 3: "U"}
+        
+        # Add edges
         edge_colors = []
         for s in range(n_state):
-            for a in range(n_action):  # actions 0 or 1
+            for a in range(n_action):
                 for s_next in range(n_state):
                     prob = T[s, a, s_next]
                     if prob > 0:
-                        # Add a directed edge from s to s_next
-                        # Label with a=0 or a=1, or probability, or both
-                        G.add_edge(s, s_next, label=f"A{a}, p={prob:.1f}")
-                        
-                        # (Optional) color edges differently for each action
-                        if a == 0:  
-                            edge_colors.append("blue")   # right edges in blue
-                        else:
-                            edge_colors.append("green")  # down edges in green
+                        # Create a directed edge from s to s_next
+                        lbl = f"{action_labels[a]}, p={prob:.1f}"
+                        G.add_edge(s, s_next, label=lbl)
 
-        # Build position dictionary
+                        # Choose an edge color based on the action
+                        edge_colors.append(action_colors[a])
+        # Build position dictionary for states
         pos = {}
         horizontal_scale = 3
         vertical_scale = 3
         offset = 0.2
-        for s in range(n_state):
-            row = s // self.env_size[0] #4
-            col = s % self.env_size[1] #4
-            pos[s+1] = (col * horizontal_scale, -row * vertical_scale)
-            if s in self.unrewarded_terminals: 
-                # if s==17: 
-                # pos[s] = (pos[16][0]+offset, pos[16][1] + offset)
-                idx = self.unrewarded_terminals.index(s)
-                pos[s] = (pos[self.rewarded_terminals[idx]][0]+offset, 
-                          pos[self.rewarded_terminals[idx]][1] + offset)
-            elif s > self.num_unique_states:
-            # elif s > 17: 
-                pos[s] = (pos[self.clone_dict[s]][0]+offset, pos[self.clone_dict[s]][1]+offset)
 
-        plt.figure(figsize=(12,8))
-        # Create a color list; default 'lightblue', but 'red' for special_node
+        # For a 4x4 grid, you typically have states 0..15 internally.
+        # If self.env_size = (4,4), that means 4 rows, 4 cols.
+        # row = s // cols, col = s % cols  => row = s//4, col = s%4
+        for s in range(n_state):
+            row = s // self.env_size[1]  # self.env_size=(4,4)-> row = s // 4
+            col = s % self.env_size[1]   # col = s % 4
+            # Node indexing in your environment might be 1-based => map s->s+1
+            # Plot them with negative row so the first row appears on top
+            pos[s+1] = (col * horizontal_scale, -row * vertical_scale)
+
+            # If s is an unrewarded terminal, offset it next to the associated rewarded terminal
+            if s in self.unrewarded_terminals:
+                idx = self.unrewarded_terminals.index(s)
+                rew_terminal = self.rewarded_terminals[idx]
+                pos[s] = (pos[rew_terminal][0] + offset, 
+                        pos[rew_terminal][1] + offset)
+            elif s > self.num_unique_states:
+                # If you have extra states or clones, you might offset them from a 'clone_dict' etc.
+                # This is just your original logic. If you don't need it, remove it.
+                pos[s] = (pos[self.clone_dict[s]][0] + offset, 
+                        pos[self.clone_dict[s]][1] + offset)
+
+        # Draw figure
+        plt.figure(figsize=(12, 8))
+
+        # Determine node colors
         colors = []
         for node in G.nodes():
             state = int(node)
@@ -106,33 +129,33 @@ class Environment:
                 colors.append("red")
             elif state == highlight_node_2:
                 colors.append("yellow")
-            elif self.is_rewarded_terminal(state):
-                colors.append("lightgreen")
-            elif self.is_unrewarded_terminal(state):
-                colors.append("lightcoral")
+            # elif self.is_rewarded_terminal(state):
+            #     colors.append("lightgreen")
+            # elif self.is_unrewarded_terminal(state):
+            #     colors.append("lightcoral")
             else:
                 colors.append("lightblue")
-        
-        # nx.draw_networkx_nodes(G, pos, node_color='lightblue', node_size=1200)
+
+        # Draw nodes, labels
         nx.draw_networkx_nodes(G, pos, node_color=colors, node_size=1200)
         nx.draw_networkx_labels(G, pos, font_size=20, font_color='black')
 
-        # We need to extract edges in the same order they were added 
-        # so that edge_colors aligns properly
+        # Get edges in the order added to match edge_colors
         edges = list(G.edges())
         nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=edge_colors,
                             arrowstyle='->', arrowsize=20, width=3)
-        nx.draw_networkx_edge_labels(G, pos, 
+        nx.draw_networkx_edge_labels(G, pos,
                                     edge_labels=nx.get_edge_attributes(G, 'label'),
                                     font_size=10, label_pos=0.5)
 
         plt.axis('off')
-        plt.title("Graph at iteration {}".format(niter), size=20)
+        plt.title(f"Graph at iteration {niter}", size=20)
         plt.tight_layout()
-    
-        savename = savename+"_iteration_" + str(niter)
-        if save: 
-            plt.savefig(savename)
+
+        # Save figure if desired
+        final_name = f"{savename}_iteration_{niter}"
+        if save:
+            plt.savefig(final_name)
         plt.show()
 
     

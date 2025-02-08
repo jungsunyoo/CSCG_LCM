@@ -501,10 +501,10 @@ def calculate_contingency(dataset, s, sprime, sprime2):
                 if a/(a+b)==1: # and d/(c+d)==1):
                     
                     contingency_states.append(curr_state)
-        print(f"state {curr_state} has a value {a} and b value {b} leading to a/(a+b) = {a/(a+b) if a+b != 0 else -1}")
+        # print(f"state {curr_state} has a value {a} and b value {b} leading to a/(a+b) = {a/(a+b) if a+b != 0 else -1}")
         # print(f"state {curr_state} has a value {a} and c value {c} leading to a/(a+c) = {a/(a+c) if a+c != 0 else -1}")
         
-    print(f"contigency states: {contingency_states}")
+    # print(f"contigency states: {contingency_states}")
     return contingency_states
 
 def calculate_contingency_tmaze(dataset, s, sprime, sprime2):
