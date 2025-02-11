@@ -63,7 +63,45 @@ def generate_dataset(env, n_episodes=10, max_steps=20):
 
     return dataset
 
-def TM(dataset):
+def transition_matrix(dataset):
+    """
+    Given a dataset of episodes, each episode being (states_seq),
+    build a 2D count matrix of shape [max_state+1, max_state+1].
+    
+    NO ACTION!
+    
+    Returns:
+        transition_counts (np.ndarray): counts[s,s_next]
+            The number of times we observed (state=s) --> (next_state=s_next).
+    """
+    # 1) Collect all observed states and actions to determine indexing bounds
+    all_states = set()
+    # all_actions = set()
+    
+    for states_seq, _ in dataset:
+        for s in states_seq:
+            all_states.add(s)
+
+    max_state = max(all_states) if all_states else 0
+    
+    # 2) Initialize a 3D count array
+    #    We'll assume states range from 0..max_state
+    #    and actions range from 0..max_action
+    transition_counts = np.zeros((max_state+1,  max_state+1), dtype=int)
+    
+    # 3) Fill in the counts by iterating over each episode's transitions
+    for states_seq, _ in dataset:
+        # for each step t in the episode
+        # print(len(states_seq), len(actions_seq))
+        for t in range(len(states_seq)-1):
+            s = states_seq[t]
+            # a = actions_seq[t]
+            s_next = states_seq[t+1]
+            transition_counts[s, s_next] += 1
+    
+    return transition_counts
+
+def transition_matrix_action(dataset):
     """
     Given a dataset of episodes, each episode being (states_seq, actions_seq),
     build a 3D count matrix of shape [max_state+1, max_action+1, max_state+1].
@@ -101,6 +139,71 @@ def TM(dataset):
             transition_counts[s, a, s_next] += 1
     
     return transition_counts
+
+def row_normalize(matrix):
+    """
+    Returns a row-normalized copy of 'matrix'.
+    Each row of the result sums to 1.
+    """
+    # Convert to float to avoid integer division issues
+    matrix = matrix.astype(float)
+    
+    # Sum over columns, keep dimension for broadcasting
+    row_sums = matrix.sum(axis=1, keepdims=True)
+
+    # Avoid division by zero by replacing zeros with 1.0
+    row_sums[row_sums == 0] = 1.0
+    
+    # Divide each row by its sum
+    normalized = matrix / row_sums
+    
+    return normalized
+def retrospective_transition_matrix(P, z):
+    """
+    Given an n x n prospective transition matrix P and a 1D stationary 
+    distribution vector z of length n, compute the time-reversed (retrospective)
+    transition matrix P_r where:
+    
+        P_r(i,j) = (z[i] * P(i,j)) / z[j].
+        
+    Parameters
+    ----------
+    P : np.ndarray (shape: (n, n))
+        Prospective transition matrix (row-stochastic).
+    z : np.ndarray (shape: (n,))
+        Stationary distribution, satisfying zP = z and sum(z)=1.
+        
+    Returns
+    -------
+    P_r : np.ndarray (shape: (n, n))
+        The retrospective transition matrix.  Often, by default, this might
+        be "column-stochastic" if you interpret P_r(i,j) as the probability
+        of i -> j in the reversed chain.  In typical Markov chain notation,
+        P_r is used as P_r(j|i) = P(X_t = i | X_{t+1} = j), etc.
+    """
+    # Convert to float arrays (just to ensure no integer division occurs).
+    P = np.asarray(P, dtype=float)
+    z = np.asarray(z, dtype=float)
+    
+    # Check dimensions
+    n, m = P.shape
+    if n != m:
+        raise ValueError("P must be square.")
+    if z.shape[0] != n:
+        raise ValueError("z must have length n to match P's dimensions.")
+    
+    # Check for zeros in z to avoid division by zero
+    if np.any(z == 0):
+        raise ValueError("z contains zero entries; cannot compute retrospective transitions.")
+
+    # Compute retrospective transition matrix:
+    # P_r(i,j) = z[i]/z[j] * P(i,j)
+    # Using broadcasting: z[:, None] is shape (n,1), z[None, :] is shape (1,n).
+    # So z[:, None] / z[None, :] is shape (n,n).
+    # Then we multiply elementwise by P.
+    P_r = P * (z[:, None] / z[None, :])
+    
+    return P_r
 
 def successor_representations(dataset, gamma=0.9, alpha=0.1, n_states=None, n_passes=1):
     """
