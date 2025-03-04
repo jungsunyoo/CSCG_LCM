@@ -174,7 +174,7 @@ def retrospective_transition_matrix(P, z):
         Stationary distribution, satisfying zP = z and sum(z)=1.
         
     Returns
-    -------
+    -------transition_matrix_action
     P_r : np.ndarray (shape: (n, n))
         The retrospective transition matrix.  Often, by default, this might
         be "column-stochastic" if you interpret P_r(i,j) as the probability
