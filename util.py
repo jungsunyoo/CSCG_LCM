@@ -532,12 +532,15 @@ def has_transition(s,sprime,sequence):
 # s=12
 # sprime=16
 # sprime2 = 17
-def calculate_contingency(dataset, s, sprime, sprime2):
+def calculate_contingency_old(dataset, s, sprime, sprime2, env_size):
     unique_states = get_unique_states(dataset)
     contingency_states = []
     for curr_state in unique_states:
         # if curr_state<100:
-        if (curr_state < s or curr_state > 17):    # maybe here
+        # if (curr_state < s or curr_state > 17):    # maybe here
+        if (curr_state < s or curr_state > env_size[0]*env_size[1]+1): 
+            # the +1 should be generalized with number of "stochastic states" soon
+            
             # print(curr_state)
             # episodes_with_state = 0
             # episodes_with_state_and_transition = 0
@@ -609,6 +612,56 @@ def calculate_contingency(dataset, s, sprime, sprime2):
         
     # print(f"contigency states: {contingency_states}")
     return contingency_states
+
+# s=12
+# sprime=16
+# sprime2 = 17
+def calculate_contingency(dataset, sprime, sprime2, env_size):
+    unique_states = get_unique_states(dataset)
+    contingency_states = []
+    E_r, E_nr = conditioned_eligibility_traces(dataset, env_size, sprime, sprime2)
+    
+    # reshaping and transposing are for visualization purposes
+    # E_r_ = np.reshape(E_r[-1,1:env_size[0]*env_size[1]+1], (env_size[0],env_size[1]))
+    # E_r_ = np.transpose(E_r_)
+    
+    # E_nr_ = np.reshape(E_nr[-1,1:env_size[0]*env_size[1]+1], (env_size[0],env_size[1]))
+    # E_nr_ = np.transpose(E_nr_) 
+    # print(E_r, np.shape(E_r))
+    # print(E_nr, np.shape(E_nr))    
+    # E_nr_ = E_nr[-1,1:]
+    # E_r_ = E_r[-1,1:]
+    E_r[E_r==0] = 1e-3
+    # E_nr[E_nr==0] = 1e-3
+    E_c = E_r / (E_r + E_nr )    
+    # E_c = E_r_ / (E_r_ + E_nr_ )
+    possible_cues = np.where(E_c==1)
+    
+    # Preprocessing because we don't want first stage (0) or terminal state (24)
+    # Flatten the nested list to a single list
+    flattened = [x for sub in possible_cues for x in sub]
+
+    # Convert to a set to get unique values
+    unique_vals = set(flattened)
+
+    # Define the values to exclude
+    exclude = {0, env_size[0]*env_size[1]-1}
+
+    # Filter out unwanted values
+    result = [val for val in unique_vals if val not in exclude]
+    
+    
+    
+    
+    # possible_cues = possible_cues
+    # print(possible_cues)
+    # return possible_cues
+    # E_contingency = E_r_ / (E_r_ + E_nr_ )
+    # for states_seq, _ in dataset: # sequential sampling
+    #     terminal = states_seq[-1]
+    return result
+        
+
 
 def calculate_contingency_tmaze(dataset, s, sprime, sprime2):
     unique_states = get_unique_states(dataset)
@@ -690,3 +743,42 @@ def get_successor_states(transition_counts,s,a):
     next_states = transition_counts[s,a]
     sprime = np.where(next_states!=0)[0]
     return sprime
+
+
+def conditioned_eligibility_traces_old(dataset, env_size):
+    n_states = max(max(pair[0]) for pair in dataset) + 1
+    E_r = np.zeros((1,n_states))
+    E_nr = np.zeros((1,n_states))
+    for state_seq, _ in dataset:
+        E = compute_eligibility_traces(state_seq, n_states)
+        if state_seq[-1] == env_size[0]*env_size[1]:
+            # print(E)
+            E_r += E[-1,:]
+            # print(E_r)
+            etmap = np.reshape(E_r[-1,:env_size[0]*env_size[1]], (env_size[0],env_size[1]))
+            etmap = np.transpose(etmap)
+            # sns.heatmap(etmap) 
+            # plt.show()       
+            
+        else: 
+            E_nr += E[-1,:]
+    return E_r, E_nr
+
+def conditioned_eligibility_traces(dataset, env_size, sprime, sprime2):
+    n_states = max(max(pair[0]) for pair in dataset) + 1
+    E_r = np.zeros((1,n_states))
+    E_nr = np.zeros((1,n_states))
+    for state_seq, _ in dataset:
+        E = compute_eligibility_traces(state_seq, n_states)
+        if state_seq[-1] == sprime: # like 16 (R)
+            # print(E)
+            E_r += E[-1,:]
+            # print(E_r)
+            etmap = np.reshape(E_r[-1,:env_size[0]*env_size[1]], (env_size[0],env_size[1]))
+            etmap = np.transpose(etmap)
+            # sns.heatmap(etmap) 
+            # plt.show()       
+            
+        elif state_seq[-1] == sprime2: # like 17 (nR)
+            E_nr += E[-1,:]
+    return E_r, E_nr

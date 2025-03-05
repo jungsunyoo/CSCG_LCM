@@ -81,8 +81,8 @@ class Environment:
         n_state = np.shape(T)[0]
         n_action = np.shape(T)[1]
         # Add nodes
-        for s in range(n_state-1):
-            G.add_node(s+1)
+        for s in range(n_state):
+            G.add_node(s)
             
         # Define colors/labels for each action
         action_colors = {0: "blue",   # Right
@@ -118,7 +118,7 @@ class Environment:
             col = s % self.env_size[1]   # col = s % 4
             # Node indexing in your environment might be 1-based => map s->s+1
             # Plot them with negative row so the first row appears on top
-            pos[s+1] = (col * horizontal_scale, -row * vertical_scale)
+            pos[s] = (col * horizontal_scale, -row * vertical_scale)
 
             # If s is an unrewarded terminal, offset it next to the associated rewarded terminal
             if s in self.unrewarded_terminals:
@@ -126,7 +126,8 @@ class Environment:
                 rew_terminal = self.rewarded_terminals[idx]
                 pos[s] = (pos[rew_terminal][0] + offset, 
                         pos[rew_terminal][1] + offset)
-            elif s > self.num_unique_states:
+            elif s > self.num_unique_states-1:
+            # else:
                 # If you have extra states or clones, you might offset them from a 'clone_dict' etc.
                 # This is just your original logic. If you don't need it, remove it.
                 pos[s] = (pos[self.clone_dict[s]][0] + offset, 
@@ -199,7 +200,7 @@ class GridEnv(Environment):
       an unrewarded terminal state (which yields -1).
     """
 
-    def __init__(self, cue_states=[2], env_size=(4,4), rewarded_terminal=[16]):
+    def __init__(self, cue_states=[5], env_size=(4,4), rewarded_terminal=[15]):
         """
         cue_states       : list of states that serve as 'cues' (must be visited 
                            to get +1 at terminal)
@@ -210,7 +211,7 @@ class GridEnv(Environment):
         
         # Build a mapping of (row, col) -> state (1-indexed)
         self.pos_to_state = {}
-        state_counter = 0
+        state_counter = -1
         for r in range(self.env_size[0]):
             for c in range(self.env_size[1]):
                 state_counter += 1
@@ -222,10 +223,11 @@ class GridEnv(Environment):
         # corresponding 'unrewarded_terminal' by shifting the index. 
         # For example: if 16 is a rewarded terminal, 17 would be the unrewarded one, etc.
         # We'll keep that logic, but adapt to however many rewarded terminals you have.
-        unrewarded_terminals = [s + state_counter for s in range(len(rewarded_terminal))]
+        unrewarded_terminals = [s + state_counter for s in np.arange(1,len(rewarded_terminal)+1)]
+        # unrewarded_terminals = [s + state_counter for s in range(len(rewarded_terminal))]
 
         # Start state is always 1 in this example, but you can change as needed.
-        start_state = 1
+        start_state = 0
 
         # Call super constructor (assuming 'Environment' base class)
         super().__init__(rewarded_termimals=rewarded_terminal, 
@@ -249,7 +251,7 @@ class GridEnv(Environment):
         self.valid_actions = self._build_valid_actions()
 
         # Total states = actual grid states + # of unrewarded terminal states
-        self.num_unique_states = state_counter + len(self.unrewarded_terminals)
+        self.num_unique_states = state_counter + len(self.unrewarded_terminals) + 1
 
         # Reset environment
         self.reset()
@@ -355,10 +357,10 @@ class GridEnvRightDownNoSelf(Environment):
     - Same cue logic: must visit 5 for a +1 reward at 9, else goes to 10 with -1.
     """
 
-    def __init__(self, cue_states=[2], env_size = (4,4), rewarded_terminal=[16]):
+    def __init__(self, cue_states=[5], env_size = (4,4), rewarded_terminal=[15]):
         self.env_size = env_size
         self.pos_to_state = {}        
-        state = 0
+        state = -1
         for i in range(self.env_size[0]):
             for j in range(self.env_size[1]):
                 state += 1
@@ -368,8 +370,9 @@ class GridEnvRightDownNoSelf(Environment):
         self.state_to_pos = {s: rc for rc, s in self.pos_to_state.items()}
 
         # self.unrewarded_terminals = self.rewarded_terminals+1  # not in the grid, just a label
-        unrewarded_terminals = [s+state+1 for s in range(len(rewarded_terminal))]
-        start_state = 1
+        # unrewarded_terminals = [s+state+1 for s in range(len(rewarded_terminal))]
+        unrewarded_terminals = [s + state for s in np.arange(1,len(rewarded_terminal)+1)]
+        start_state = 0
 
         super().__init__(rewarded_termimals=rewarded_terminal, 
                          unrewarded_termimals=unrewarded_terminals,
@@ -388,7 +391,8 @@ class GridEnvRightDownNoSelf(Environment):
         # per-state action set (no invalid moves).
         self.valid_actions = self._build_valid_actions()
 
-        self.num_unique_states = state + len(self.unrewarded_terminals) # hard coded for now # done!
+        # self.num_unique_states = state + len(self.unrewarded_terminals) # hard coded for now # done!
+        self.num_unique_states = state + len(self.unrewarded_terminals) + 1
         self.reset()
 
     def _build_valid_actions(self):
@@ -412,11 +416,14 @@ class GridEnvRightDownNoSelf(Environment):
                             valid_dict[s].append(a)
         
         # For terminal states, no actions are valid
-        for terminals in self.rewarded_terminals:
-            valid_dict[terminals] = []
-        for terminals in self.unrewarded_terminals:
-            valid_dict[terminals] = []
-
+        # for terminals in self.rewarded_terminals:
+        #     valid_dict[terminals] = []
+        # for terminals in self.unrewarded_terminals:
+        #     valid_dict[terminals] = []
+        # For terminal states, no valid actions
+        for terminal in self.rewarded_terminals + self.unrewarded_terminals:
+            valid_dict[terminal] = []
+            
         return valid_dict
 
     def reset(self):
@@ -494,10 +501,10 @@ class GridEnvRightDownNoCue(Environment):
     - Same cue logic: must visit 5 for a +1 reward at 9, else goes to 10 with -1.
     """
 
-    def __init__(self, cue_states=[2], env_size = (4,4), rewarded_terminal=[16]):
+    def __init__(self, cue_states=[5], env_size = (4,4), rewarded_terminal=[15]):
         self.env_size = env_size
         self.pos_to_state = {}        
-        state = 0
+        state = -1
         for i in range(self.env_size[0]):
             for j in range(self.env_size[1]):
                 state += 1
@@ -507,8 +514,9 @@ class GridEnvRightDownNoCue(Environment):
         self.state_to_pos = {s: rc for rc, s in self.pos_to_state.items()}
 
         # self.unrewarded_terminals = self.rewarded_terminals+1  # not in the grid, just a label
-        unrewarded_terminals = [s+state+1 for s in range(len(rewarded_terminal))]
-        start_state = 1
+        # unrewarded_terminals = [s+state+1 for s in range(len(rewarded_terminal))]
+        unrewarded_terminals = [s + state for s in np.arange(1,len(rewarded_terminal)+1)]
+        start_state = 0
 
         super().__init__(rewarded_termimals=rewarded_terminal, 
                          unrewarded_termimals=unrewarded_terminals,
@@ -527,7 +535,8 @@ class GridEnvRightDownNoCue(Environment):
         # per-state action set (no invalid moves).
         self.valid_actions = self._build_valid_actions()
 
-        self.num_unique_states = state + len(self.unrewarded_terminals) # hard coded for now # done!
+        # self.num_unique_states = state + len(self.unrewarded_terminals) # hard coded for now # done!
+        self.num_unique_states = state + len(self.unrewarded_terminals) + 1
         self.reset()
 
     def _build_valid_actions(self):
@@ -551,11 +560,14 @@ class GridEnvRightDownNoCue(Environment):
                             valid_dict[s].append(a)
         
         # For terminal states, no actions are valid
-        for terminals in self.rewarded_terminals:
-            valid_dict[terminals] = []
-        for terminals in self.unrewarded_terminals:
-            valid_dict[terminals] = []
+        # for terminals in self.rewarded_terminals:
+        #     valid_dict[terminals] = []
+        # for terminals in self.unrewarded_terminals:
+        #     valid_dict[terminals] = []
 
+        # For terminal states, no valid actions
+        for terminal in self.rewarded_terminals + self.unrewarded_terminals:
+            valid_dict[terminal] = []
         return valid_dict
 
     def reset(self):
@@ -630,155 +642,6 @@ class GridEnvRightDownNoCue(Environment):
         # Update current state
         self.current_state = next_state
         return next_state, reward, done
-
-
-
-
-
-
-# # TODO: Update this
-# class GridEnvRightDownNoCue(Environment):
-#     """
-#     A 3x3 grid with states numbered 1..9:
-
-#         1   2   3
-#         4   5   6
-#         7   8   9
-
-#     - The agent can only move RIGHT (0) or DOWN (1).
-#     - No self-transitions at borders:
-#         If an action would go out of bounds, that action is not allowed
-#         from that state.
-#     - Same cue logic: must visit 5 for a +1 reward at 9, else goes to 10 with -1.
-#     """
-
-#     def __init__(self):
-#         # Grid layout: (row, col) -> state
-#         self.pos_to_state = {
-#             (0,0): 1, (0,1): 2, (0,2): 3, (0,3): 4,
-#             (1,0): 5, (1,1): 6, (1,2): 7, (1,3): 8,
-#             (2,0): 9, (2,1): 10, (2,2): 11, (2,3): 12,
-#             (3,0): 13, (3,1): 14, (3,2): 15, (3,3): 16,
-#         }
-#         self.state_to_pos = {s: rc for rc, s in self.pos_to_state.items()}
-        
-#         # Actions as integers: 0=right, 1=down
-#         # right => (0, +1)
-#         # down  => (+1, 0)
-#         self.base_actions = {
-#             0: (0, +1),   # right
-#             1: (+1, 0)    # down
-#         }
-        
-#         # Instead of having a static [0,1] action space, we have a
-#         # per-state action set (no invalid moves).
-#         self.valid_actions = self._build_valid_actions()
-
-#         # Special states
-#         self.start_state = 1
-#         # self.cue_state = cue_state
-#         self.rewarded_terminal = 16
-#         self.unrewarded_terminal = 17  # not in the grid, just a label
-
-#         self.reset()
-
-#     def _build_valid_actions(self):
-#         """
-#         Precompute valid actions for each non-terminal grid state.
-#         A 'valid' action is one that leads to a NEW in-bounds state.
-#         """
-#         valid_dict = {}
-#         for row in range(4):
-#             for col in range(4):
-#                 s = self.pos_to_state[(row, col)]
-#                 # We'll store all actions that yield a different state (no self-transitions)
-#                 valid_dict[s] = []
-#                 for a, (dr, dc) in self.base_actions.items():
-#                     new_r = row + dr
-#                     new_c = col + dc
-#                     if 0 <= new_r < 4 and 0 <= new_c < 4:
-#                         next_s = self.pos_to_state[(new_r, new_c)]
-#                         # Only count it if next_s != s (which can't happen in 3x3, but let's be explicit)
-#                         if next_s != s:
-#                             valid_dict[s].append(a)
-
-#         # For terminal states 9 and 10, no actions are valid
-#         # valid_dict[9] = []
-#         # valid_dict[10] = []
-#         valid_dict[16] = []
-#         valid_dict[17] = []
-
-#         return valid_dict
-
-#     def reset(self):
-#         """
-#         Reset environment to the start:
-#           - current_state=1
-#           - visited_cue=False
-#         Returns current_state (1).
-#         """
-#         self.current_state = self.start_state
-#         self.visited_cue = False
-#         return self.current_state
-
-#     def get_valid_actions(self, state=None):
-#         """
-#         Return the list of valid actions for the current state
-#         (or a given state).
-#         """
-#         if state is None:
-#             state = self.current_state
-#         return self.valid_actions[state]
-
-#     def step(self, action):
-#         """
-#         Step with a guaranteed valid action. If an invalid action is given,
-#         we can either ignore or raise an Exception. We'll raise an error.
-#         """
-#         if action not in self.get_valid_actions():
-#             raise ValueError(f"Action {action} is not valid from state {self.current_state}.")
-
-#         # If we're already in a terminal (9 or 10), episode is over.
-#         if self.current_state in [self.rewarded_terminal, self.unrewarded_terminal]:
-#             return self.current_state, 0, True
-
-#         # Move
-#         row, col = self.state_to_pos[self.current_state]
-#         dr, dc = self.base_actions[action]
-#         next_row = row + dr
-#         next_col = col + dc
-
-#         next_state = self.pos_to_state[(next_row, next_col)]
-        
-#         # if self.current_state == 15
-#         # if next_state == 16:
-
-
-#         # Check cue
-#         # if next_state == self.cue_state:
-#         #     self.visited_cue = True
-
-#         reward = 0
-#         done = False
-
-#         # Terminal condition: 8 -> 9
-#         if next_state == 16:
-#             done = True
-#             # if self.visited_cue:
-#                 # reward = +1
-#             if np.random.rand() < 0.5:
-#                 next_state = self.unrewarded_terminal
-#             else: 
-#                 # next_state=17       
-#                 next_state = self.rewarded_terminal
-#             # else:
-#                 # reward = -1
-                
-
-#         # Update
-#         self.current_state = next_state
-#         return next_state, reward, done
-    
 
 
 # ------------------------------------------------------------------------------------
