@@ -486,6 +486,7 @@ class GridEnvRightDownNoSelf(Environment):
         self.current_state = next_state
         return next_state, reward, done
 
+
 class GridEnvRightDownNoCue(Environment):
     """
     A 3x3 grid with states numbered 1..9:
@@ -791,8 +792,6 @@ class GridEnvDivergingSingleReward(Environment):
         return next_state, reward, done
     
 
-
-
 class GridEnvDivergingMultipleReward(Environment):
     """
     A 3x3 grid with states numbered 1..9:
@@ -933,7 +932,6 @@ class GridEnvDivergingMultipleReward(Environment):
         return next_state, reward, done
     
 
-
 # ------------------------------------------------------------------------------------
 # -------------------------------- Other Environments --------------------------------
 # ------------------------------------------------------------------------------------
@@ -1059,3 +1057,146 @@ class ContinuousTMaze(Environment):
         plt.axis('off')
         plt.title("Iteration {}".format(niter))
         plt.show()
+
+
+
+class GridLatentInhibition(Environment):
+    """
+    A 3x3 grid with states numbered 1..9:
+
+        1   2   3
+        4   5   6
+        7   8   9
+
+    - The agent can only move RIGHT (0) or DOWN (1).
+    - No self-transitions at borders:
+        If an action would go out of bounds, that action is not allowed
+        from that state.
+    - Same cue logic: must visit 5 for a +1 reward at 9, else goes to 10 with -1.
+    """
+
+    def __init__(self, cue_states=[5], env_size = (4,4), rewarded_terminal=[15]):
+        self.env_size = env_size
+        self.pos_to_state = {}        
+        state = -1
+        for i in range(self.env_size[0]):
+            for j in range(self.env_size[1]):
+                state += 1
+                self.pos_to_state[(i,j)] = state
+                
+        
+        self.state_to_pos = {s: rc for rc, s in self.pos_to_state.items()}
+
+        # self.unrewarded_terminals = self.rewarded_terminals+1  # not in the grid, just a label
+        # unrewarded_terminals = [s+state+1 for s in range(len(rewarded_terminal))]
+        unrewarded_terminals = [s + state for s in np.arange(1,len(rewarded_terminal)+1)]
+        start_state = 0
+
+        super().__init__(rewarded_termimals=rewarded_terminal, 
+                         unrewarded_termimals=unrewarded_terminals,
+                         start = start_state,
+                         cues=cue_states)
+        
+        # Actions as integers: 0=right, 1=down
+        # right => (0, +1)
+        # down  => (+1, 0)
+        self.base_actions = {
+            0: (0, +1),   # right
+            1: (+1, 0)    # down
+        }
+        
+        # Instead of having a static [0,1] action space, we have a
+        # per-state action set (no invalid moves).
+        self.valid_actions = self._build_valid_actions()
+
+        # self.num_unique_states = state + len(self.unrewarded_terminals) # hard coded for now # done!
+        self.num_unique_states = state + len(self.unrewarded_terminals) + 1
+        self.reset()
+
+    def _build_valid_actions(self):
+        """
+        Precompute valid actions for each non-terminal grid state.
+        A 'valid' action is one that leads to a NEW in-bounds state.
+        """
+        valid_dict = {}
+        for row in range(self.env_size[0]):
+            for col in range(self.env_size[1]):
+                s = self.pos_to_state[(row, col)]
+                # We'll store all actions that yield a different state (no self-transitions)
+                valid_dict[s] = []
+                for a, (dr, dc) in self.base_actions.items():
+                    new_r = row + dr
+                    new_c = col + dc
+                    if 0 <= new_r < self.env_size[0] and 0 <= new_c < self.env_size[1]:
+                        next_s = self.pos_to_state[(new_r, new_c)]
+                        # Only count it if next_s != s (which can't happen in 3x3, but let's be explicit)
+                        if next_s != s:
+                            valid_dict[s].append(a)
+        
+        for terminal in self.rewarded_terminals + self.unrewarded_terminals:
+            valid_dict[terminal] = []
+            
+        return valid_dict
+
+    def reset(self):
+        """
+        Reset environment to the start:
+          - current_state=1
+          - visited_cue=False
+        Returns current_state (1).
+        """
+        self.current_state = self.start_state
+        self.visited_cue = False
+        return self.current_state
+
+    def get_valid_actions(self, state=None):
+        """
+        Return the list of valid actions for the current state
+        (or a given state).
+        """
+        if state is None:
+            state = self.current_state
+        return self.valid_actions[state]
+
+    def step(self, action, phase):
+        """
+        Step with a guaranteed valid action. If an invalid action is given,
+        we can either ignore or raise an Exception. We'll raise an error.
+
+        phase variable determines if the environment is preexposing or conditioning 
+        """
+        if action not in self.get_valid_actions():
+            raise ValueError(f"Action {action} is not valid from state {self.current_state}.")
+
+        # If we're already in a terminal (9 or 10), episode is over.
+        if self.current_state in self.rewarded_terminals + self.unrewarded_terminals:
+            return self.current_state, 0, True
+
+        # Move
+        row, col = self.state_to_pos[self.current_state]
+        dr, dc = self.base_actions[action]
+        next_row = row + dr
+        next_col = col + dc
+
+        next_state = self.pos_to_state[(next_row, next_col)]
+
+        # Check cue
+        if next_state in self.cue_states:
+            self.visited_cue = True
+
+        reward = 0
+        done = False
+
+        if self.is_terminal(next_state):    
+            done = True
+            if self.visited_cue and phase == 2:
+                print("reward")
+                reward = +1
+            else:
+                reward = -1
+                idx = self.rewarded_terminals.index(next_state)
+                next_state = self.unrewarded_terminals[idx]
+
+        # Update current state
+        self.current_state = next_state
+        return next_state, reward, done
