@@ -10,7 +10,7 @@ import igraph
 from matplotlib import cm, colors
 random.seed(42)
 import seaborn as sns
-from testing_environments import ContinuousTMaze, GridEnvRightDownNoCue, GridEnvRightDownNoSelf, GridEnvDivergingMultipleReward, GridEnvDivergingSingleReward
+from spatial_environments import * #ContinuousTMaze, GridEnvRightDownNoCue, GridEnvRightDownNoSelf, GridEnvDivergingMultipleReward, GridEnvDivergingSingleReward
 
  
 def generate_dataset(env, n_episodes=10, max_steps=20):
@@ -451,6 +451,30 @@ def compute_eligibility_traces(states, n_states, gamma=0.9, lam=0.8):
         
     return E
 
+def compute_eligibility_traces_normalized(states, n_states, gamma=0.9, lam=0.8):
+    """
+    Compute a normalized eligibility trace for a single episode's state sequence:
+    each time step's eligibility vector sums to 1.
+    """
+    E = np.zeros((len(states), n_states))  # E[t, s]
+    e = np.zeros(n_states)  # current eligibility vector
+    
+    for t, s in enumerate(states):
+        # Decay
+        e *= gamma * lam
+        
+        # Increment for current state
+        e[s] += 1.0
+        
+        # Normalize so sum(e) = 1 (provided sum(e) > 0, which it will be here)
+        sum_e = e.sum()
+        if sum_e > 0:
+            e /= sum_e
+        
+        E[t] = e.copy()
+    
+    return E
+
 def compute_transition_entropies(transition_probs, tol=1e-9):
     """
     Given transition_probs[s, a, s_next], compute the Shannon entropy
@@ -620,17 +644,7 @@ def calculate_contingency(dataset, sprime, sprime2, env_size):
     unique_states = get_unique_states(dataset)
     contingency_states = []
     E_r, E_nr = conditioned_eligibility_traces(dataset, env_size, sprime, sprime2)
-    
-    # reshaping and transposing are for visualization purposes
-    # E_r_ = np.reshape(E_r[-1,1:env_size[0]*env_size[1]+1], (env_size[0],env_size[1]))
-    # E_r_ = np.transpose(E_r_)
-    
-    # E_nr_ = np.reshape(E_nr[-1,1:env_size[0]*env_size[1]+1], (env_size[0],env_size[1]))
-    # E_nr_ = np.transpose(E_nr_) 
-    # print(E_r, np.shape(E_r))
-    # print(E_nr, np.shape(E_nr))    
-    # E_nr_ = E_nr[-1,1:]
-    # E_r_ = E_r[-1,1:]
+
     E_r[E_r==0] = 1e-3
     # E_nr[E_nr==0] = 1e-3
     E_c = E_r / (E_r + E_nr )    
@@ -649,16 +663,7 @@ def calculate_contingency(dataset, sprime, sprime2, env_size):
 
     # Filter out unwanted values
     result = [val for val in unique_vals if val not in exclude]
-    
-    
-    
-    
-    # possible_cues = possible_cues
-    # print(possible_cues)
-    # return possible_cues
-    # E_contingency = E_r_ / (E_r_ + E_nr_ )
-    # for states_seq, _ in dataset: # sequential sampling
-    #     terminal = states_seq[-1]
+
     return result
         
 
@@ -764,21 +769,40 @@ def conditioned_eligibility_traces_old(dataset, env_size):
             E_nr += E[-1,:]
     return E_r, E_nr
 
-def conditioned_eligibility_traces(dataset, env_size, sprime, sprime2):
+def conditioned_eligibility_traces(dataset, sprime, sprime2, lam = 0.8, gamma=0.9):
     n_states = max(max(pair[0]) for pair in dataset) + 1
     E_r = np.zeros((1,n_states))
     E_nr = np.zeros((1,n_states))
     for state_seq, _ in dataset:
-        E = compute_eligibility_traces(state_seq, n_states)
+        E = compute_eligibility_traces(state_seq, n_states, lam=lam)
         if state_seq[-1] == sprime: # like 16 (R)
             # print(E)
             E_r += E[-1,:]
             # print(E_r)
-            etmap = np.reshape(E_r[-1,:env_size[0]*env_size[1]], (env_size[0],env_size[1]))
-            etmap = np.transpose(etmap)
+            # etmap = np.reshape(E_r[-1,:env_size[0]*env_size[1]], (env_size[0],env_size[1]))
+            # etmap = np.transpose(etmap)
             # sns.heatmap(etmap) 
             # plt.show()       
             
         elif state_seq[-1] == sprime2: # like 17 (nR)
             E_nr += E[-1,:]
     return E_r, E_nr
+
+# def conditioned_eligibility_traces_abstract(dataset, env_size, sprime, sprime2):
+#     n_states = max(max(pair[0]) for pair in dataset) + 1
+#     E_r = np.zeros((1,n_states))
+#     E_nr = np.zeros((1,n_states))
+#     for state_seq, _ in dataset:
+#         E = compute_eligibility_traces(state_seq, n_states)
+#         if state_seq[-1] == sprime: # like 16 (R)
+#             # print(E)
+#             E_r += E[-1,:]
+#             # # print(E_r)
+#             # etmap = np.reshape(E_r[-1,:env_size[0]*env_size[1]], (env_size[0],env_size[1]))
+#             # etmap = np.transpose(etmap)
+#             # sns.heatmap(etmap) 
+#             # plt.show()       
+            
+#         elif state_seq[-1] == sprime2: # like 17 (nR)
+#             E_nr += E[-1,:]
+#     return E_r, E_nr
