@@ -63,6 +63,63 @@ def generate_dataset(env, n_episodes=10, max_steps=20):
 
     return dataset
 
+
+def generate_inhibition_dataset(env:'GridLatentInhibition', n_episodes=36, max_steps=10):
+    """
+    Run 'n_episodes' episodes in the environment. Each episode ends
+    either when the environment signals 'done' or when we hit 'max_steps'.
+
+    Returns:
+        A list of (state_sequence, action_sequence) pairs.
+        - state_sequence: list of visited states
+        - action_sequence: list of chosen actions
+    """
+    dataset = []
+    phase = 1
+
+    for episode_idx in range(n_episodes):
+        if episode_idx > 9:  # end preexposure
+            phase = 2
+            
+        # Prepare lists to store states & actions for this episode
+        states = []
+        actions = []
+
+        # Reset env to start a new episode
+        state = env.reset()
+
+        for t in range(max_steps):
+            states.append(state)
+
+            valid_actions = env.get_valid_actions(state)
+            if not valid_actions:
+                # No valid actions => we must be in a terminal or stuck
+                break
+
+            # Example: pick a random valid action
+            action = np.random.choice(valid_actions)
+            actions.append(action)
+
+            # Step in the environment
+            next_state, reward, done = env.step(action, phase)
+
+            state = next_state
+
+            if done:
+                # Also record the final state
+                states.append(state)
+
+                # if state == 16:
+                #     print(f"rewarded path: {states}")
+                break
+                
+        # Store (states, actions) for this episode
+        if done: # only append datasets that reached terminal state
+            dataset.append([states, actions])
+
+    return dataset
+
+
 def transition_matrix(dataset):
     """
     Given a dataset of episodes, each episode being (states_seq),
