@@ -215,6 +215,7 @@ def row_normalize(matrix):
     normalized = matrix / row_sums
     
     return normalized
+
 def retrospective_transition_matrix(P, z):
     """
     Given an n x n prospective transition matrix P and a 1D stationary 
@@ -613,100 +614,69 @@ def has_transition(s,sprime,sequence):
 # s=12
 # sprime=16
 # sprime2 = 17
-def calculate_contingency_old(dataset, s, sprime, sprime2, env_size):
-    unique_states = get_unique_states(dataset)
+def track_contingency_merge(dataset, cue, sprime, sprime2):
+    # unique_states = get_unique_states(dataset)
     contingency_states = []
-    for curr_state in unique_states:
-        # if curr_state<100:
-        # if (curr_state < s or curr_state > 17):    # maybe here
-        if (curr_state < s or curr_state > env_size[0]*env_size[1]+1): 
-            # the +1 should be generalized with number of "stochastic states" soon
-            
-            # print(curr_state)
-            # episodes_with_state = 0
-            # episodes_with_state_and_transition = 0
-            # other =0
-            # curr_state = 6
+    # curr_state = cue
+    # for curr_state in unique_states:
+    # if (curr_state < cue or curr_state > env_size[0]*env_size[1]+1): 
+        # the +1 should be generalized with number of "stochastic states" soon
+    total = 0
+    a=0
+    b=0
+    c=0
+    d=0
+    sensitivity = 0
+    # conditioned_contingency=0
+    # print("Current state: {}".format(curr_state))
+    for states_seq, _ in dataset:
+        # if has_state(states_seq,cue):
+        total += 1
+        if has_state(states_seq, cue):
+            if has_state(states_seq, sprime):
+            # if has_transition(cue,sprime,states_seq): 
+                a += 1
+            elif has_state(states_seq, sprime2):
+            # elif has_transition(cue,sprime2, states_seq): 
+                b+=1
+            else: 
+                check = has_state(states_seq, sprime)
+                print('here1')
+                
+        else: 
+            if states_seq[-1] == sprime: # if ~cue & reward
+            # if has_transition(cue,sprime,states_seq): 
+                c += 1
+            # elif has_transition(cue,sprime2, states_seq): 
+            elif states_seq[-1] == sprime2: # if ~cue & ~reward
+                d+=1              
+            else: 
+                check = states_seq[-1]
+                print('here2')       
+    assert total == a+b+c+d
+    if a+b !=0 and c+d != 0: 
+        # if (a/(a+b)==1 and d/(c+d)==1):
+        # if a/(a+b)==1: # and d/(c+d)==1):
+        # if a/(a+c)
+            sensitivity = a / (a+c)
+            # contingency_states.append(curr_state)
 
-            total = 0
-            a=0
-            b=0
-            c=0
-            d=0
-            conditioned_contingency=0
-            # print("Current state: {}".format(curr_state))
-            for states_seq, actions_seq in dataset:
-                if has_state(states_seq,s):
-                    total += 1
-                    if has_state(states_seq, curr_state):
-                    
-                        
-                        # episodes_with_state += 1
-                        if has_transition(s,sprime,states_seq): 
-                            # episodes_with_state_and_transition += 1   
-                            a += 1
-                            # if curr_state==18:
-                            #     print('a:')
-                            #     print(states_seq)
-                            # print('transition: {}'.format(states_seq))
-                        elif has_transition(s,sprime2, states_seq): 
-                            # print(states_seq)
-                            b+=1
-                            # if curr_state==18:
-                            #     print('b:')
-                            #     print(states_seq)
-                    else: 
-                        # print('here')
-                        if has_transition(s,sprime,states_seq): 
-                            # episodes_with_state_and_transition += 1   
-                            c += 1
-                            # if curr_state==18:
-                            #     print('c:')
-                            #     print(states_seq)                            
-                            
-                            # print('transition: {}'.format(states_seq))
-                        elif has_transition(s,sprime2, states_seq): 
-                            # print(states_seq)
-                            d+=1
-                            # if curr_state==18:
-                            #     print('d:')
-                            #     print(states_seq)                            
-                    assert total == a+b+c+d
-            # if curr_state == 18: 
-            #     print(a/(a+b), d/(c+d))
-            #     print(a,b,c,d)
-            # if a+b != 0: 
-            #     print("forward contingency: {}".format(a/(a+b)))
-            # else: 
-            #     print("no forward contingency")
-            # if c+d != 0: 
-            #     print("backward contingency: {}".format(d/(c+d)))
-            # else: 
-            #     print("no backward contingency")
-            if a+b !=0 and c+d != 0: 
-                # if (a/(a+b)==1 and d/(c+d)==1):
-                if a/(a+b)==1: # and d/(c+d)==1):
-                    
-                    contingency_states.append(curr_state)
-        # print(f"state {curr_state} has a value {a} and b value {b} leading to a/(a+b) = {a/(a+b) if a+b != 0 else -1}")
-        # print(f"state {curr_state} has a value {a} and c value {c} leading to a/(a+c) = {a/(a+c) if a+c != 0 else -1}")
-        
-    # print(f"contigency states: {contingency_states}")
-    return contingency_states
+    return sensitivity
 
 # s=12
 # sprime=16
 # sprime2 = 17
-def calculate_contingency(dataset, sprime, sprime2, env_size):
+def calculate_contingency(dataset, sprime, sprime2, env_size, threshold=0.9):
     unique_states = get_unique_states(dataset)
     contingency_states = []
-    E_r, E_nr = conditioned_eligibility_traces(dataset, env_size, sprime, sprime2)
+    E_r, E_nr = conditioned_eligibility_traces(dataset,sprime, sprime2)
 
     E_r[E_r==0] = 1e-3
     # E_nr[E_nr==0] = 1e-3
     E_c = E_r / (E_r + E_nr )    
     # E_c = E_r_ / (E_r_ + E_nr_ )
-    possible_cues = np.where(E_c==1)
+    # possible_cues = np.where(E_c==1)
+    possible_cues = np.where(E_c>threshold)
     
     # Preprocessing because we don't want first stage (0) or terminal state (24)
     # Flatten the nested list to a single list
@@ -827,11 +797,12 @@ def conditioned_eligibility_traces_old(dataset, env_size):
     return E_r, E_nr
 
 def conditioned_eligibility_traces(dataset, sprime, sprime2, lam = 0.8, gamma=0.9):
+  
     n_states = max(max(pair[0]) for pair in dataset) + 1
     E_r = np.zeros((1,n_states))
     E_nr = np.zeros((1,n_states))
     for state_seq, _ in dataset:
-        E = compute_eligibility_traces(state_seq, n_states, lam=lam)
+        E = compute_eligibility_traces(state_seq, n_states, lam=lam, gamma=gamma)
         if state_seq[-1] == sprime: # like 16 (R)
             # print(E)
             E_r += E[-1,:]

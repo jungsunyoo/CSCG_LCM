@@ -22,6 +22,7 @@ class Environment:
 
         self.clone_dict = dict()
         self.reverse_clone_dict = dict()
+        self.cue_memory = dict()
         # self.pos_to_state = dict()
         
 
@@ -68,6 +69,9 @@ class Environment:
     def add_reverse_clone_dict(self, new_clone, successor):
         self.reverse_clone_dict[successor] = new_clone
 
+    def add_cue_memory(self, cue, sensitivity):
+        # self.cue_memory.append(cue)
+        self.cue_memory[cue] = sensitivity
 
     def plot_graph(self, T, niter, 
                 #    reward_terminal = [16], env_size = (4,4),
