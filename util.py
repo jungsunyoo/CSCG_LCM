@@ -11,7 +11,7 @@ from matplotlib import cm, colors
 random.seed(42)
 import seaborn as sns
 from spatial_environments import * #ContinuousTMaze, GridEnvRightDownNoCue, GridEnvRightDownNoSelf, GridEnvDivergingMultipleReward, GridEnvDivergingSingleReward
-
+from scipy.stats import beta
  
 def generate_dataset(env, n_episodes=10, max_steps=20):
     """
@@ -63,6 +63,67 @@ def generate_dataset(env, n_episodes=10, max_steps=20):
 
     return dataset
 
+def generate_dataset_post_augmentation(env, T, n_episodes=10, max_steps=20):
+    """
+    Run 'n_episodes' episodes in the environment. Each episode ends
+    either when the environment signals 'done' or when we hit 'max_steps'.
+
+    Returns:
+        A list of (state_sequence, action_sequence) pairs.
+        - state_sequence: list of visited states
+        - action_sequence: list of chosen actions
+    """
+    dataset = []
+
+    for episode_idx in range(n_episodes):
+        # Prepare lists to store states & actions for this episode
+        states = []
+        actions = []
+
+        # Reset env to start a new episode
+        state = env.reset()
+        # state = 0
+
+        for t in range(max_steps):
+            states.append(state)
+            if state > env.env_size[0] * env.env_size[1]: # this is a cloned state
+                valid_actions = env.get_valid_actions(env.clone_dict[state])
+            else:
+                
+                
+                valid_actions = env.get_valid_actions(state)
+            if not valid_actions:
+                # No valid actions => we must be in a terminal or stuck
+                break
+
+            # Example: pick a random valid action
+            action = np.random.choice(valid_actions)
+            actions.append(action)
+
+            # Step in the environment
+            next_state, reward, done = env.step(action)
+            
+            # here, figure out if next state is clone or not
+            if T[state, action, next_state] < 1e-3:
+                #this is probably not a valid connection
+                next_state = env.reverse_clone_dict[next_state]
+            # else:
+            
+            state = next_state
+
+            if done:
+                # Also record the final state
+                states.append(state)
+
+                # if state == 16:
+                #     print(f"rewarded path: {states}")
+                break
+                
+        # Store (states, actions) for this episode
+        if done: # only append datasets that reached terminal state
+            dataset.append([states, actions])
+
+    return dataset
 
 def generate_inhibition_dataset(env:'GridLatentInhibition', n_episodes=36, max_steps=10):
     """
@@ -194,6 +255,50 @@ def transition_matrix_action(dataset):
             a = actions_seq[t]
             s_next = states_seq[t+1]
             transition_counts[s, a, s_next] += 1
+    
+    return transition_counts
+
+def transition_matrix_action_trial_by_trial(dataset, episode, transition_counts = None):
+    """
+    Given a sequence (states_seq, actions_seq),
+    build a 3D count matrix of shape [max_state+1, max_action+1, max_state+1].
+    
+    Returns:
+        transition_counts (np.ndarray): counts[s, a, s_next]
+            The number of times we observed (state=s) --(action=a)--> (next_state=s_next).
+    """
+    # 1) Collect all observed states and actions to determine indexing bounds
+    all_states = set()
+    all_actions = set()
+    
+    for states_seq, actions_seq in dataset:
+        for s in states_seq:
+            all_states.add(s)
+        for a in actions_seq:
+            all_actions.add(a)
+    
+    max_state = max(all_states) if all_states else 0
+    max_action = max(all_actions) if all_actions else 0
+    
+    # 2) Initialize a 3D count array
+    #    We'll assume states range from 0..max_state
+    #    and actions range from 0..max_action
+    if transition_counts is not None:
+        # update transition count
+        pass
+    else: # initialize
+        transition_counts = np.zeros((max_state+1, max_action+1, max_state+1), dtype=int)
+    
+    # 3) Fill in the counts by iterating over each episode's transitions
+    # for states_seq, actions_seq in dataset:
+        # for each step t in the episode
+        # print(len(states_seq), len(actions_seq))
+    states_seq, actions_seq = episode
+    for t in range(len(actions_seq)):
+        s = states_seq[t]
+        a = actions_seq[t]
+        s_next = states_seq[t+1]
+        transition_counts[s, a, s_next] += 1
     
     return transition_counts
 
@@ -493,8 +598,10 @@ def compute_eligibility_traces(states, n_states, gamma=0.9, lam=0.8):
     # We'll keep a running "eligibility vector" e for all states,
     # and store its value at each step in E.
     E = np.zeros((len(states), n_states))  # E[t, s] = eligibility of state s at time t
+    C = np.zeros((len(states), n_states))  # Count of state s at time t
     
     e = np.zeros(n_states)  # current eligibility vector (initially all zeros)
+    c = np.zeros(n_states)
     
     # Iterate over each visited state in the trajectory
     for t, s in enumerate(states):
@@ -503,11 +610,13 @@ def compute_eligibility_traces(states, n_states, gamma=0.9, lam=0.8):
         
         # Increment eligibility for the current state by 1
         e[s] += 1.0
+        c[s] += 1.0
         
         # Store a snapshot of the eligibility vector at this time step
         E[t] = e.copy()
+        C[t] = c.copy()
         
-    return E
+    return E, C # C is count
 
 def compute_eligibility_traces_normalized(states, n_states, gamma=0.9, lam=0.8):
     """
@@ -574,6 +683,162 @@ def compute_transition_entropies(transition_probs, tol=1e-9):
             
     return entropies
 
+def compute_transition_entropies_weighted(transition_counts, tol=1e-9, alpha0 = 1, eps_W = 0.1):
+    """
+    Given transition_probs[s, a, s_next], compute the Shannon entropy
+    (in bits, i.e. log base 2) of each (s, a) distribution.
+    
+    Returns:
+        entropies: A 2D array of shape [S, A], where entropies[s, a]
+                   is the entropy of transition_probs[s, a, :].
+    
+    Notes:
+      - If the total probability mass for (s, a) is ~0 (i.e. no data),
+        we set entropy to 0 by default (or you could mark it as NaN).
+      - We ignore states that are purely out-of-bounds or never visited.
+    """
+    
+    denominators = transition_counts.sum(axis=2, keepdims=True)
+    denominators = denominators.astype(float)
+    denominators[denominators == 0] = 1
+    if np.any(denominators == 0):
+        print('denominator 0')
+        print(denominators)
+    transition_probs = transition_counts / denominators
+    
+    S, A, _ = transition_probs.shape
+    entropies = np.zeros((S, A), dtype=float)
+    confidence = np.zeros((S, A), dtype=float)
+    weight = 0
+    for s in range(S):
+        for a in range(A):
+            dist = transition_probs[s, a]  # shape = [S]
+            counts = transition_counts[s,a] # shape = [S]
+            
+            # Sum of probabilities (should be ~1 if we have data)
+            total_prob = dist.sum()
+            if total_prob < tol:
+                # Means no data or zero-prob distribution
+                entropies[s, a] = 0.0
+                continue
+            
+            # Identify the non-zero probabilities (to avoid log(0))
+            p_nonzero = dist[dist > tol]
+            counts = counts[dist>tol]
+            
+            # Normalize them so they sum to 1
+            p_nonzero /= p_nonzero.sum()
+            
+            # Shannon entropy in bits
+            #  E = - sum(p * log2(p))
+            ent = -np.sum(p_nonzero * np.log2(p_nonzero))
+            entropies[s, a] = ent
+            
+            # assert len(counts) > 2
+            if len(counts) > 2:
+                print(counts)
+            if len(counts) == 2:
+                n_x, n_y = counts
+                alpha_x = n_x + alpha0
+                alpha_y = n_y + alpha0
+            # N = alpha_x + alpha_y
+            
+            
+            
+                lo, hi = beta.ppf([0.025, 0.975], alpha_x, alpha_y)
+                # weight = 1/(hi-lo)
+                # if (hi - lo) >= eps_W:
+                    # return False 
+                confidence[s,a] =  1/(hi-lo)
+            elif len(counts) == 1:
+                confidence[s,a] = 0 # entropy is 0 anyway too
+            elif len(counts) == 0:
+                confidence[s,a] = 0 # entropy is anyway too
+                         
+            
+            
+    return entropies, confidence
+
+def compute_transition_entropies_thresholded(transition_counts, tol=1e-9, alpha0 = 1, eps_W = 0.1):
+    """
+    Given transition_probs[s, a, s_next], compute the Shannon entropy
+    (in bits, i.e. log base 2) of each (s, a) distribution.
+    
+    Returns:
+        entropies: A 2D array of shape [S, A], where entropies[s, a]
+                   is the entropy of transition_probs[s, a, :].
+    
+    Notes:
+      - If the total probability mass for (s, a) is ~0 (i.e. no data),
+        we set entropy to 0 by default (or you could mark it as NaN).
+      - We ignore states that are purely out-of-bounds or never visited.
+    """
+    
+    denominators = transition_counts.sum(axis=2, keepdims=True)
+    denominators = denominators.astype(float)
+    denominators[denominators == 0] = 1
+    if np.any(denominators == 0):
+        print('denominator 0')
+        print(denominators)
+    transition_probs = transition_counts / denominators
+    
+    S, A, _ = transition_probs.shape
+    entropies = np.zeros((S, A), dtype=float)
+    confidence = np.zeros((S, A), dtype=float)
+    weight = 0
+    for s in range(S):
+        for a in range(A):
+            dist = transition_probs[s, a]  # shape = [S]
+            counts = transition_counts[s,a] # shape = [S]
+            states = np.arange(len(counts))
+            
+            # Sum of probabilities (should be ~1 if we have data)
+            total_prob = dist.sum()
+            if total_prob < tol:
+                # Means no data or zero-prob distribution
+                entropies[s, a] = 0.0
+                continue
+            
+            # Identify the non-zero probabilities (to avoid log(0))
+            p_nonzero = dist[dist > tol]
+            counts = counts[dist>tol]
+            
+            # Normalize them so they sum to 1
+            p_nonzero /= p_nonzero.sum()
+            
+            # Shannon entropy in bits
+            #  E = - sum(p * log2(p))
+            ent = -np.sum(p_nonzero * np.log2(p_nonzero))
+            entropies[s, a] = ent
+            
+            # assert len(counts) > 2
+            # if len(counts) > 2:
+            #     # print(s,a)
+            #     # print(states[dist>tol])
+            #     print(counts)
+            # if len(counts) == 2:
+            #     n_x, n_y = counts
+            # #     alpha_x = n_x + alpha0
+            # #     alpha_y = n_y + alpha0
+            # # # N = alpha_x + alpha_y
+            
+            
+            
+            # #     lo, hi = beta.ppf([0.025, 0.975], alpha_x, alpha_y)
+            #     # weight = 1/(hi-lo)
+            #     # if (hi - lo) >= eps_W:
+            #         # return False 
+            #     confidence[s,a] =  n_x + n_y #1/(hi-lo)
+            # elif len(counts) == 1:
+            #     confidence[s,a] = 0 # entropy is 0 anyway too
+            # elif len(counts) == 0:
+            #     confidence[s,a] = 0 # entropy is anyway too
+            confidence[s,a] = sum(counts)
+                         
+            
+            
+    return entropies, confidence
+
 def find_stochastic_state_actions_by_entropy(entropies, eps=1e-9):
     """
     Given a 2D array of entropies[s,a], return a list of (s,a) pairs
@@ -587,6 +852,43 @@ def find_stochastic_state_actions_by_entropy(entropies, eps=1e-9):
             if entropies[s, a] > eps:
                 stochastic_pairs.append((s,a))
     return stochastic_pairs
+
+def find_stochastic_state_actions_by_entropy_weighted(entropies, confidence, threshold=1):
+    """
+    Given a 2D array of entropies[s,a], return a list of (s,a) pairs
+    that are strictly > eps in entropy (i.e. non-deterministic).
+    Weighted by distribution of posterior (e.g. don't just assume by first few trials)
+    """
+    stochastic_pairs = []
+    S, A = entropies.shape
+    for s in range(S):
+        for a in range(A):
+            # If entropy is basically 0 => deterministic
+            if entropies[s,a] * confidence[s,a] > threshold:
+            # if entropies[s, a] > eps_H: # if entropy exceeds threshold
+                stochastic_pairs.append((s,a))
+    return stochastic_pairs
+
+def find_stochastic_state_actions_by_entropy_thresholded(entropies, confidence_counts, entropy_threshold = 1e-9, 
+                                                         n_threshold=10):
+    """
+    Given a 2D array of entropies[s,a], return a list of (s,a) pairs
+    that are strictly > eps in entropy (i.e. non-deterministic).
+    Weighted by distribution of posterior (e.g. don't just assume by first few trials)
+    """
+    stochastic_pairs = []
+    S, A = entropies.shape
+    for s in range(S):
+        for a in range(A):
+            # If entropy is basically 0 => deterministic
+            # if entropies[s,a] * confidence[s,a] > threshold:
+            if entropies[s, a] > entropy_threshold:
+            # if entropies[s,a] * confidence[s,a] > threshold:
+                if confidence_counts[s,a] > n_threshold:
+            # if entropies[s, a] > eps_H: # if entropy exceeds threshold
+                    stochastic_pairs.append((s,a))
+    return stochastic_pairs
+
 
 # Functions for contingency & splitting
 
@@ -614,7 +916,9 @@ def has_transition(s,sprime,sequence):
 # s=12
 # sprime=16
 # sprime2 = 17
-def track_contingency_merge(dataset, cue, sprime, sprime2):
+# def track_contingency_merge(dataset, cue, sprime, sprime2):
+
+def calculate_forward_contingency(dataset, cue, sprime, sprime2, pseudocount = 1e-3):
     # unique_states = get_unique_states(dataset)
     contingency_states = []
     # curr_state = cue
@@ -654,11 +958,109 @@ def track_contingency_merge(dataset, cue, sprime, sprime2):
                 check = states_seq[-1]
                 print('here2')       
     assert total == a+b+c+d
-    if a+b !=0 and c+d != 0: 
+    # if a+b !=0 and c+d != 0: 
         # if (a/(a+b)==1 and d/(c+d)==1):
         # if a/(a+b)==1: # and d/(c+d)==1):
         # if a/(a+c)
-            sensitivity = a / (a+c)
+    sensitivity = a / (a+c+pseudocount)
+            # contingency_states.append(curr_state)
+
+    return sensitivity
+
+def calculate_backward_contingency_val(dataset, cue, sprime, sprime2, pseudocount = 1e-3):
+    # unique_states = get_unique_states(dataset)
+    contingency_states = []
+    # curr_state = cue
+    # for curr_state in unique_states:
+    # if (curr_state < cue or curr_state > env_size[0]*env_size[1]+1): 
+        # the +1 should be generalized with number of "stochastic states" soon
+    total = 0
+    a=0
+    b=0
+    c=0
+    d=0
+    sensitivity = 0
+    # conditioned_contingency=0
+    # print("Current state: {}".format(curr_state))
+    for states_seq, _ in dataset:
+        # if has_state(states_seq,cue):
+        total += 1
+        if has_state(states_seq, cue):
+            if has_state(states_seq, sprime):
+            # if has_transition(cue,sprime,states_seq): 
+                a += 1
+            elif has_state(states_seq, sprime2):
+            # elif has_transition(cue,sprime2, states_seq): 
+                b+=1
+            else: 
+                check = has_state(states_seq, sprime)
+                print('here1')
+                
+        else: 
+            if states_seq[-1] == sprime: # if ~cue & reward
+            # if has_transition(cue,sprime,states_seq): 
+                c += 1
+            # elif has_transition(cue,sprime2, states_seq): 
+            elif states_seq[-1] == sprime2: # if ~cue & ~reward
+                d+=1              
+            else: 
+                check = states_seq[-1]
+                print('here2')       
+    assert total == a+b+c+d
+    # if a+b !=0 and c+d != 0: 
+        # if (a/(a+b)==1 and d/(c+d)==1):
+        # if a/(a+b)==1: # and d/(c+d)==1):
+        # if a/(a+c)
+    sensitivity = a / (a+b+pseudocount)
+            # contingency_states.append(curr_state)
+
+    return sensitivity
+
+def calculate_forward_contingency_val(dataset, cue, sprime, sprime2, pseudocount = 1e-3):
+    # unique_states = get_unique_states(dataset)
+    contingency_states = []
+    # curr_state = cue
+    # for curr_state in unique_states:
+    # if (curr_state < cue or curr_state > env_size[0]*env_size[1]+1): 
+        # the +1 should be generalized with number of "stochastic states" soon
+    total = 0
+    a=0
+    b=0
+    c=0
+    d=0
+    sensitivity = 0
+    # conditioned_contingency=0
+    # print("Current state: {}".format(curr_state))
+    for states_seq, _ in dataset:
+        # if has_state(states_seq,cue):
+        total += 1
+        if has_state(states_seq, cue):
+            if has_state(states_seq, sprime):
+            # if has_transition(cue,sprime,states_seq): 
+                a += 1
+            elif has_state(states_seq, sprime2):
+            # elif has_transition(cue,sprime2, states_seq): 
+                b+=1
+            else: 
+                check = has_state(states_seq, sprime)
+                print('here1')
+                
+        else: 
+            if states_seq[-1] == sprime: # if ~cue & reward
+            # if has_transition(cue,sprime,states_seq): 
+                c += 1
+            # elif has_transition(cue,sprime2, states_seq): 
+            elif states_seq[-1] == sprime2: # if ~cue & ~reward
+                d+=1              
+            else: 
+                check = states_seq[-1]
+                print('here2')       
+    assert total == a+b+c+d
+    # if a+b !=0 and c+d != 0: 
+        # if (a/(a+b)==1 and d/(c+d)==1):
+        # if a/(a+b)==1: # and d/(c+d)==1):
+        # if a/(a+c)
+    sensitivity = a / (a+c+pseudocount)
             # contingency_states.append(curr_state)
 
     return sensitivity
@@ -666,14 +1068,14 @@ def track_contingency_merge(dataset, cue, sprime, sprime2):
 # s=12
 # sprime=16
 # sprime2 = 17
-def calculate_contingency(dataset, sprime, sprime2, env_size, threshold=0.9):
+def calculate_backward_contingency(dataset, sprime, sprime2, env_size, threshold=0.9, pseudocount = 1e-3):
     unique_states = get_unique_states(dataset)
     contingency_states = []
     E_r, E_nr = conditioned_eligibility_traces(dataset,sprime, sprime2)
 
-    E_r[E_r==0] = 1e-3
+    # E_r[E_r==0] = 1e-3
     # E_nr[E_nr==0] = 1e-3
-    E_c = E_r / (E_r + E_nr )    
+    E_c = E_r / (E_r + E_nr +  pseudocount)    
     # E_c = E_r_ / (E_r_ + E_nr_ )
     # possible_cues = np.where(E_c==1)
     possible_cues = np.where(E_c>threshold)
@@ -692,7 +1094,93 @@ def calculate_contingency(dataset, sprime, sprime2, env_size, threshold=0.9):
     result = [val for val in unique_vals if val not in exclude]
 
     return result
-        
+
+def calculate_backward_contingency(dataset, sprime, sprime2, env_size, threshold=0.9, pseudocount = 1e-3):
+    unique_states = get_unique_states(dataset)
+    contingency_states = []
+    E_r, E_nr = conditioned_eligibility_traces(dataset,sprime, sprime2)
+
+    # E_r[E_r==0] = 1e-3
+    # E_nr[E_nr==0] = 1e-3
+    E_c = E_r / (E_r + E_nr +  pseudocount)    
+    # E_c = E_r_ / (E_r_ + E_nr_ )
+    # possible_cues = np.where(E_c==1)
+    possible_cues = np.where(E_c>threshold)
+    
+    # Preprocessing because we don't want first stage (0) or terminal state (24)
+    # Flatten the nested list to a single list
+    flattened = [x for sub in possible_cues for x in sub]
+
+    # Convert to a set to get unique values
+    unique_vals = set(flattened)
+
+    # Define the values to exclude
+    exclude = {0, env_size[0]*env_size[1]-1}
+
+    # Filter out unwanted values
+    result = [val for val in unique_vals if val not in exclude]
+
+    return result
+# cue = calculate_backward_contingency_trial_by_trial(E_r, E_nr, episodes, sprime, sprime2, env_size)        
+def calculate_backward_contingency_trial_by_trial(E_r, E_nr, C, env_size, threshold=0.9, pseudocount = 1e-3, n_threshold=10):
+    # unique_states = get_unique_states(dataset)
+    # contingency_states = []
+    # E_r, E_nr = conditioned_eligibility_traces(dataset,sprime, sprime2)
+
+    # E_r[E_r==0] = 1e-3
+    # E_nr[E_nr==0] = 1e-3
+    E_c = E_r / (E_r + E_nr +  pseudocount)    
+    # E_c = E_r_ / (E_r_ + E_nr_ )
+    # possible_cues = np.where(E_c==1)
+    mask = (E_c > threshold) & (C > n_threshold)   # Boolean mask
+    possible_cues = np.where(mask)         # indices (tuple) that satisfy both tests
+    
+    # possible_cues = np.where(E_c>threshold) 
+    
+    # Preprocessing because we don't want first stage (0) or terminal state (24)
+    # Flatten the nested list to a single list
+    flattened = [x for sub in possible_cues for x in sub]
+
+    # Convert to a set to get unique values
+    unique_vals = set(flattened)
+
+    # Define the values to exclude
+    exclude = {0, env_size[0]*env_size[1]-1}
+
+    # Filter out unwanted values
+    result = [val for val in unique_vals if val not in exclude]
+
+    return result
+
+def calculate_forward_contingency_trial_by_trial(E_r, E_nr, C, env_size, threshold=0.9, pseudocount = 1e-3, n_threshold=10):
+    # unique_states = get_unique_states(dataset)
+    # contingency_states = []
+    # E_r, E_nr = conditioned_eligibility_traces(dataset,sprime, sprime2)
+
+    # E_r[E_r==0] = 1e-3
+    # E_nr[E_nr==0] = 1e-3
+    E_c = E_r / (E_r + E_nr +  pseudocount)    
+    # E_c = E_r_ / (E_r_ + E_nr_ )
+    # possible_cues = np.where(E_c==1)
+    mask = (E_c > threshold) & (C > n_threshold)   # Boolean mask
+    possible_cues = np.where(mask)         # indices (tuple) that satisfy both tests
+    
+    # possible_cues = np.where(E_c>threshold) 
+    
+    # Preprocessing because we don't want first stage (0) or terminal state (24)
+    # Flatten the nested list to a single list
+    flattened = [x for sub in possible_cues for x in sub]
+
+    # Convert to a set to get unique values
+    unique_vals = set(flattened)
+
+    # Define the values to exclude
+    exclude = {0, env_size[0]*env_size[1]-1}
+
+    # Filter out unwanted values
+    result = [val for val in unique_vals if val not in exclude]
+
+    return result
 
 
 def calculate_contingency_tmaze(dataset, s, sprime, sprime2):
@@ -802,7 +1290,7 @@ def conditioned_eligibility_traces(dataset, sprime, sprime2, lam = 0.8, gamma=0.
     E_r = np.zeros((1,n_states))
     E_nr = np.zeros((1,n_states))
     for state_seq, _ in dataset:
-        E = compute_eligibility_traces(state_seq, n_states, lam=lam, gamma=gamma)
+        E,_ = compute_eligibility_traces(state_seq, n_states, lam=lam, gamma=gamma)
         if state_seq[-1] == sprime: # like 16 (R)
             # print(E)
             E_r += E[-1,:]
@@ -815,6 +1303,30 @@ def conditioned_eligibility_traces(dataset, sprime, sprime2, lam = 0.8, gamma=0.
         elif state_seq[-1] == sprime2: # like 17 (nR)
             E_nr += E[-1,:]
     return E_r, E_nr
+
+def accumulate_conditioned_eligibility_traces(E_r, E_nr, C, state_seq, sprime, sprime2, n_states, 
+                                              lam = 0.8, gamma=0.9):
+  
+    # n_states = max(max(pair[0]) for pair in dataset) + 1
+    # E_r = np.zeros((1,n_states))
+    # E_nr = np.zeros((1,n_states))
+    # for state_seq, _ in dataset:
+    E, count = compute_eligibility_traces(state_seq, n_states, lam=lam, gamma=gamma)
+    if state_seq[-1] == sprime: # like 16 (R)
+        # print(E)
+        E_r += E[-1,:]
+        
+        # print(E_r)
+        # etmap = np.reshape(E_r[-1,:env_size[0]*env_size[1]], (env_size[0],env_size[1]))
+        # etmap = np.transpose(etmap)
+        # sns.heatmap(etmap) 
+        # plt.show()       
+        
+    elif state_seq[-1] == sprime2: # like 17 (nR)
+        E_nr += E[-1,:]
+    # C[]
+    C += count[-1,:]
+    return E_r, E_nr, C
 
 # def conditioned_eligibility_traces_abstract(dataset, env_size, sprime, sprime2):
 #     n_states = max(max(pair[0]) for pair in dataset) + 1

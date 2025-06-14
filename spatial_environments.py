@@ -10,10 +10,20 @@ import igraph
 from matplotlib import cm, colors
 random.seed(42)
 import seaborn as sns
+from typing import Optional, Union, Sequence
 
 class Environment:
     """Abstract Base Class for all environment classes"""
-    def __init__(self, rewarded_termimals:list, unrewarded_termimals:list, start:int, cues:list):  # could potentially make this a list of cues - order of cues matters
+    def __init__(self, rewarded_termimals:list, unrewarded_termimals:list, start:int, cues:list, seed: Optional[Union[int, np.random.Generator]] = None,):  # could potentially make this a list of cues - order of cues matters
+        # ---------------- global RNG ----------------------------------
+        # • int      → deterministic generator
+        # • Generator→ use it directly (shared seed across env & agent)
+        # • None     → fresh, non-deterministic generator
+        self.rng = (
+            seed if isinstance(seed, np.random.Generator)
+            else np.random.default_rng(seed)
+        )
+        
         self.rewarded_terminals = rewarded_termimals
         self.unrewarded_terminals = unrewarded_termimals
 
@@ -103,7 +113,8 @@ class Environment:
                     prob = T[s, a, s_next]
                     if prob > 0:
                         # Create a directed edge from s to s_next
-                        lbl = f"{action_labels[a]}, p={prob:.1f}"
+                        # lbl = f"{action_labels[a]}, p={prob:.1f}"
+                        lbl = f"p={prob:.1f}"
                         G.add_edge(s, s_next, label=lbl)
 
                         # Choose an edge color based on the action
@@ -156,23 +167,27 @@ class Environment:
                 colors.append("lightblue")
 
         # Draw nodes, labels
-        nx.draw_networkx_nodes(G, pos, node_color=colors, node_size=1200)
-        nx.draw_networkx_labels(G, pos, font_size=20, font_color='black')
+        nx.draw_networkx_nodes(G, pos, node_color=colors, node_size=5000, 
+                                   edgecolors='black',      # <-- border colour
+                                   linewidths=2.5           # <-- border thickness)
+        )
+        nx.draw_networkx_labels(G, pos, font_size=40, font_color='black')
 
         # Get edges in the order added to match edge_colors
         edges = list(G.edges())
         nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=edge_colors,
-                            arrowstyle='->', arrowsize=20, width=3)
+                            arrowstyle='->', arrowsize=70, width=8)
         nx.draw_networkx_edge_labels(G, pos,
                                     edge_labels=nx.get_edge_attributes(G, 'label'),
-                                    font_size=10, label_pos=0.5)
+                                    font_size=15, label_pos=0.5)
 
         plt.axis('off')
-        plt.title(f"Graph at iteration {niter}", size=20)
+        # plt.title(f"Graph at episode {niter}", size=20)
         plt.tight_layout()
 
         # Save figure if desired
-        final_name = f"{savename}_iteration_{niter}"
+        # final_name = f"{savename}_episode_{niter}"
+        final_name = f"{savename}"
         if save:
             plt.savefig(final_name)
         plt.show()
@@ -361,7 +376,7 @@ class GridEnvRightDownNoSelf(Environment):
     - Same cue logic: must visit 5 for a +1 reward at 9, else goes to 10 with -1.
     """
 
-    def __init__(self, cue_states=[5], env_size = (4,4), rewarded_terminal=[15]):
+    def __init__(self, cue_states=[5], env_size = (4,4), rewarded_terminal=[15], seed=None):
         self.env_size = env_size
         self.pos_to_state = {}        
         state = -1
@@ -381,7 +396,8 @@ class GridEnvRightDownNoSelf(Environment):
         super().__init__(rewarded_termimals=rewarded_terminal, 
                          unrewarded_termimals=unrewarded_terminals,
                          start = start_state,
-                         cues=cue_states)
+                         cues=cue_states, 
+                         seed=seed)
         
         # Actions as integers: 0=right, 1=down
         # right => (0, +1)
