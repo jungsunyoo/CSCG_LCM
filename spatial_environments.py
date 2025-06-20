@@ -86,6 +86,7 @@ class Environment:
     def plot_graph(self, T, niter, 
                 #    reward_terminal = [16], env_size = (4,4),
                    highlight_node=-1, highlight_node_2 = -1,
+                   threshold=0.3,
                    save=False,savename='img'):
         """
         Function that draws the current environment
@@ -111,7 +112,7 @@ class Environment:
             for a in range(n_action):
                 for s_next in range(n_state):
                     prob = T[s, a, s_next]
-                    if prob > 0:
+                    if prob > threshold:
                         # Create a directed edge from s to s_next
                         # lbl = f"{action_labels[a]}, p={prob:.1f}"
                         lbl = f"p={prob:.1f}"
@@ -182,7 +183,7 @@ class Environment:
                                     font_size=15, label_pos=0.5)
 
         plt.axis('off')
-        # plt.title(f"Graph at episode {niter}", size=20)
+        plt.title(f"Graph at episode {niter}", size=20)
         plt.tight_layout()
 
         # Save figure if desired
