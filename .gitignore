@@ -43,3 +43,8 @@ markovian_models/RL/main.ipynb
 
 # local scratch / old notebooks
 /grave/
+
+# local scratch
+/grave/
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
