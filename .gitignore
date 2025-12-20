@@ -40,3 +40,6 @@ markovian_models/RL/main.ipynb
 
 # model artifacts
 *.pkl
+
+# local scratch / old notebooks
+/grave/
