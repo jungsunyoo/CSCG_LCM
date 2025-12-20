@@ -1,0 +1,19 @@
+env_id: MiniGrid-DoorKey-6x6-v0
+algo: ppo
+coda: true
+steps: 200000
+seed: 0
+logdir: runs
+feature_dim: 8
+coda_params:
+  gamma: 0.95
+  lam: 0.90
+  theta_split: 0.60
+  theta_merge: 0.50
+  n_threshold: 8
+  min_presence_episodes: 3
+  min_effective_exposure: 5.0
+  confidence: 0.80
+  count_decay: 0.90
+  trace_decay: 0.90
+  retro_decay: 0.90

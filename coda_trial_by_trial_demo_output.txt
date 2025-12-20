@@ -1,0 +1,20 @@
+{
+  "uncertainty_config": {
+    "gamma": 0.9,
+    "lam": 0.8,
+    "theta_split": 0.9,
+    "theta_merge": 0.5,
+    "n_threshold": 5,
+    "eps": 1e-09,
+    "min_presence_episodes": 8,
+    "min_effective_exposure": 25.0,
+    "confidence": 0.95,
+    "alpha0": 0.5,
+    "beta0": 0.5
+  },
+  "split_events": [
+    168
+  ],
+  "merge_events": [],
+  "final_num_states": 19
+}

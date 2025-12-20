@@ -1,0 +1,11 @@
+env_id: MiniGrid-KeyCorridorS3R2-v0
+algo: ppo
+coda: true
+steps: 300000
+seed: 0
+logdir: runs
+coda_params:
+  theta_split: 0.9
+  theta_merge: 0.5
+  credible: 0.95
+  K: 8

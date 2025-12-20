@@ -1,2 +1,42 @@
 slurm*.err
 slurm*.out
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Python cache
+**/__pycache__/
+**/*.py[cod]
+**/.ipynb_checkpoints/
+
+# Generated artifacts / runs
+**/runs/
+**/*.tfevents*
+**/*.zip
+**/*.gif
+**/*.mp4
+**/*.png
+**/*.svg
+**/*.pdf
+**/wandb/
+
+# big artifacts
+models/
+*.pkl
+grave/dev-coda-v2-acq-metrics.ipynb
+
+# Jupyter
+**/.ipynb_checkpoints/
+
+# model artifacts
+*.pkl
+
+# bad/cached notebooks
+markovian_models/RL/main.ipynb
+
+# Jupyter
+**/.ipynb_checkpoints/
+
+# model artifacts
+*.pkl

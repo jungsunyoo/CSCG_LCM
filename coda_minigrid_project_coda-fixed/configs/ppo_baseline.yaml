@@ -1,0 +1,6 @@
+env_id: MiniGrid-DoorKey-6x6-v0
+algo: ppo
+coda: false
+steps: 200000
+seed: 0
+logdir: runs
