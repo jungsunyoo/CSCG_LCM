@@ -106,7 +106,8 @@ def generate_dataset_post_augmentation(env, T, n_episodes=10, max_steps=20):
             # here, figure out if next state is clone or not
             if T[state, action, next_state] < 1e-3:
                 #this is probably not a valid connection
-                next_state = env.reverse_clone_dict[next_state]
+                if next_state in env.reverse_clone_dict:
+                    next_state = env.reverse_clone_dict[next_state]
             # else:
             
             state = next_state
