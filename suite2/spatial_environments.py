@@ -87,7 +87,7 @@ class Environment:
                 #    reward_terminal = [16], env_size = (4,4),
                    highlight_node=-1, highlight_node_2 = -1,
                    threshold=0.3,
-                   save=False,savename='img'):
+                   save=False,savename='img', title=None):
         """
         Function that draws the current environment
         !!!BASE VERSION ONLY WORKS FOR GRID ENVIRONMENTS!!!
@@ -190,7 +190,10 @@ class Environment:
                                     font_size=15, label_pos=0.5)
 
         plt.axis('off')
-        plt.title(f"Graph at episode {niter}", size=20)
+        if title is not None:
+            plt.title(title, size=20)
+        else:
+            plt.title(f"Graph at episode {niter}", size=20)
         plt.tight_layout()
 
         # Save figure if desired

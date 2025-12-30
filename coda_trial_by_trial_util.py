@@ -176,6 +176,13 @@ class CoDAAgent:
         _, ep_counts = compute_eligibility_traces(states, self.n_states, gamma=self.cfg.gamma, lam=self.cfg.lam)
         presence = (ep_counts[-1,:] > 0).astype(float)[None, :]
 
+
+        # ep_E, _ = compute_eligibility_traces(states, self.n_states, gamma=self.cfg.gamma, lam=self.cfg.lam)
+        # e_last = ep_E[-1, :][None, :]                 # eligibility at terminal
+        # presence = 1.0 - np.exp(-e_last)              # squashed to (0,1)
+        # or: presence = np.clip(e_last, 0.0, 1.0)
+
+
         # EMA denominator + retrospective numerator
         if states[-1] == rewarded_terminal:
             self.us_episode_ema += 1.0
