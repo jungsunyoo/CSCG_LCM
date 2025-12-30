@@ -158,15 +158,17 @@ class CoDAAgent:
             sp = states[t+1]
             self._maybe_grow(max(s, sp))
             self.transition_counts[s, a, sp] += 1.0
+        self.transition_probs = normalize_transition_counts(self.transition_counts)
 
+    def update_eligibility_traces(self, states: List[int], sprime: int, sprime2: int):
         # prospective traces (context-conditioned)
-        rewarded_terminal  = self.env.rewarded_terminals[0]  if len(self.env.rewarded_terminals)>0   else None
-        unrewarded_terminal= self.env.unrewarded_terminals[0] if len(self.env.unrewarded_terminals)>0 else None
+        # rewarded_terminal  = self.env.rewarded_terminals[0]  if len(self.env.rewarded_terminals)>0   else None
+        # unrewarded_terminal= self.env.unrewarded_terminals[0] if len(self.env.unrewarded_terminals)>0 else None
         self.E_r, self.E_nr, self.C = accumulate_conditioned_eligibility_traces(
             self.E_r, self.E_nr, self.C,
             states,
-            sprime=rewarded_terminal,
-            sprime2=unrewarded_terminal,
+            sprime=sprime,
+            sprime2=sprime2,
             n_states=self.n_states,
             lam=self.cfg.lam,
             gamma=self.cfg.gamma
@@ -184,12 +186,11 @@ class CoDAAgent:
 
 
         # EMA denominator + retrospective numerator
-        if states[-1] == rewarded_terminal:
+        if states[-1] == sprime: #rewarded_terminal:
             self.us_episode_ema += 1.0
             self.cs_us_presence[:, :presence.shape[1]] += presence
 
         self.presence_episodes[:, :presence.shape[1]] += presence
-        self.transition_probs = normalize_transition_counts(self.transition_counts)
 
     def prospective(self) -> np.ndarray:
         num = self.E_r.copy()
