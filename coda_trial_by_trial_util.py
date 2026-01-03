@@ -89,6 +89,10 @@ class CoDAAgent:
     E_nr: np.ndarray = field(init=False)
     C: np.ndarray = field(init=False)
 
+    # goal
+    goal_positive: List[int] = field(default_factory=list)
+    goal_negative: List[int] = field(default_factory=list)
+
     # retrospective accumulators (EMA)
     cs_us_presence: np.ndarray = field(init=False)
     us_episode_ema: float = field(default=0.0, init=False)
