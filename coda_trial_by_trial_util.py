@@ -55,6 +55,33 @@ def get_action_successors_from_counts(counts: np.ndarray, s: int, a: int):
     succ_mask = counts[s, a] > 0
     return list(np.where(succ_mask)[0])
 
+# ----------------------------
+# Utilities
+# ----------------------------
+def softmax(z, eps=1e-12):
+    z = z - np.max(z)
+    ez = np.exp(z)
+    return ez / (np.sum(ez) + eps)
+
+def entropy(p, eps=1e-12):
+    p = np.clip(p, eps, 1.0)
+    return -np.sum(p * np.log(p))
+
+class RBF2D:
+    def __init__(self, n_per_dim=6, sigma=0.18):
+        xs = np.linspace(0.0, 1.0, n_per_dim)
+        ys = np.linspace(0.0, 1.0, n_per_dim)
+        centers = np.array([(x, y) for x in xs for y in ys], dtype=np.float32)  # (M,2)
+        self.centers = centers
+        self.sigma = float(sigma)
+        self.M = centers.shape[0]
+
+    def phi(self, x, y):
+        xy = np.array([x, y], dtype=np.float32)
+        d2 = np.sum((self.centers - xy[None, :]) ** 2, axis=1)
+        return np.exp(-0.5 * d2 / (self.sigma ** 2)).astype(np.float32)  # (M,)
+
+
 @dataclass
 class CoDAConfig:
     gamma: float = 0.9
@@ -74,7 +101,51 @@ class CoDAConfig:
     retro_decay: float = 1.0   # decays cs_us_presence and US-episode EMA
 
 @dataclass
-class CoDAAgent:
+class CoDAContinuous:
+    """
+    Feature-space analogue of tabular C[s,k] += E[s].
+
+    - Eligibility trace over features: e <- gamma*lambda*e + phi(x_t)
+    - Outcome-conditioned feature counts: C[k] += e when outcome k observed
+    - Prospective p(k|x) computed by matching phi(x) to C[k]
+    """
+    def __init__(self, n_outcomes, feat_dim, gamma=0.98, lam=0.9, eps=1e-8):
+        self.K = n_outcomes
+        self.M = feat_dim
+        self.gamma = gamma
+        self.lam = lam
+        self.eps = eps
+
+        self.e = np.zeros(self.M, dtype=np.float32)         # eligibility trace over FEATURES
+        self.C = np.zeros((self.K, self.M), dtype=np.float32)  # outcome-conditioned feature "counts"
+
+    def reset_episode(self):
+        self.e[:] = 0.0
+
+    def step(self, phi_x):
+        self.e *= (self.gamma * self.lam)
+        self.e += phi_x
+
+    def end_episode(self, outcome_k):
+        self.C[outcome_k] += self.e
+
+    def p_outcome_given_xy(self, phi_xy):
+        # score_k(x) = <C[k], phi(x)>  (nonnegative)
+        scores = self.C @ phi_xy
+        scores = np.maximum(scores, 0.0) + self.eps
+        return scores / np.sum(scores)
+
+    def relevance_xy(self, phi_xy):
+        # total credited mass near x
+        total_C = np.sum(self.C, axis=0)  # (M,)
+        return float(total_C @ phi_xy)
+
+    def entropy_xy(self, phi_xy):
+        return entropy(self.p_outcome_given_xy(phi_xy))
+
+
+@dataclass
+class CoDAAgent_discrete:
     env: GridEnvRightDownNoSelf
     cfg: CoDAConfig = field(default_factory=CoDAConfig)
 
